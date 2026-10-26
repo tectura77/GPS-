@@ -1,0 +1,3450 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="referrer" content="origin">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="GPS현장캠">
+<title>GPS현장캠 - PC · 아이폰 · 안드로이드 통합 웹앱</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; padding: 0; width: 100%; height: 100%;
+    background: #0b0b0d; color: #fff;
+    font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Pretendard", "Noto Sans KR", "Malgun Gothic", sans-serif;
+    overflow: hidden; user-select: none;
+  }
+  button, input, select { font-family: inherit; }
+
+  /* View Containers */
+  .view-screen { width: 100%; height: 100%; position: absolute; top: 0; left: 0; display: flex; flex-direction: column; overflow: hidden; }
+  .hidden { display: none !important; }
+
+  /* Toast Banner */
+  #toast-banner {
+    position: fixed; top: 58px; left: 50%; transform: translateX(-50%);
+    background: rgba(18, 22, 28, 0.96); color: #fff;
+    border: 1.5px solid #ffc107; border-radius: 12px;
+    padding: 10px 18px; font-size: 13px; font-weight: 700;
+    box-shadow: 0 8px 28px rgba(0,0,0,0.75);
+    z-index: 99999; text-align: center; max-width: 90%; width: max-content;
+    transition: opacity 0.2s ease; pointer-events: none;
+  }
+
+  /* Loading Overlay */
+  #loading-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.75);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    z-index: 95000;
+  }
+  .spinner {
+    width: 42px; height: 42px; border: 4px solid rgba(255,193,7,0.25);
+    border-top-color: #ffc107; border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ================= CAMERA SCREEN ================= */
+  #camera-screen { background: #000; position: relative; }
+  #camera-stage {
+    flex: 1; position: relative; display: flex; align-items: center; justify-content: center;
+    overflow: hidden; background: #000;
+  }
+  #video-frame-wrap {
+    position: relative; overflow: hidden; background: #050505;
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 0 0 1px rgba(255,255,255,0.12);
+    transition: width 0.18s ease, height 0.18s ease;
+  }
+  #cam-video {
+    width: 100%; height: 100%; object-fit: cover;
+    transform-origin: center center;
+  }
+  #cam-fallback-box {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; padding: 24px; text-align: center;
+    background: radial-gradient(circle at center, #1b2230 0%, #090b10 100%);
+    z-index: 4;
+  }
+  #shutter-flash {
+    position: absolute; inset: 0; background: rgba(255,255,255,0.75);
+    pointer-events: none; z-index: 30; opacity: 0; transition: opacity 0.08s ease;
+  }
+
+  /* Camera Top Controls */
+  .cam-top-bar {
+    position: absolute; top: max(14px, env(safe-area-inset-top)); left: 12px; right: 12px;
+    display: flex; align-items: center; justify-content: space-between; z-index: 20;
+    pointer-events: none;
+  }
+  .cam-top-bar > * { pointer-events: auto; }
+  .ratio-group {
+    display: flex; gap: 6px; background: rgba(0,0,0,0.58); padding: 4px;
+    border-radius: 22px; border: 1px solid rgba(255,255,255,0.18);
+  }
+  .ratio-btn {
+    border: none; background: transparent; color: #fff; font-weight: 700;
+    font-size: 12.5px; padding: 6px 13px; border-radius: 18px; cursor: pointer;
+  }
+  .ratio-btn.active { background: #ffc107; color: #000; }
+
+  .cam-util-group { display: flex; gap: 6px; }
+  .cam-icon-btn {
+    background: rgba(0,0,0,0.65); color: #fff; border: 1px solid rgba(255,255,255,0.28);
+    border-radius: 20px; padding: 6px 11px; font-size: 12px; font-weight: 700;
+    cursor: pointer; display: flex; align-items: center; gap: 4px;
+  }
+  .cam-icon-btn.active { border-color: #00e676; color: #00e676; }
+
+  /* Pending After Banner */
+  #after-mode-banner {
+    position: absolute; top: calc(max(14px, env(safe-area-inset-top)) + 48px);
+    left: 16px; right: 16px; z-index: 22;
+    background: rgba(27, 94, 32, 0.94); border: 1.5px solid #69f0ae;
+    border-radius: 10px; padding: 8px 12px; display: flex; align-items: center;
+    justify-content: space-between; gap: 8px;
+  }
+
+  /* Camera HUD Info Box */
+  #cam-hud-box {
+    position: absolute; left: 16px; bottom: calc(max(20px, env(safe-area-inset-bottom)) + 92px);
+    background: rgba(0,0,0,0.62); border: 1px solid rgba(255,255,255,0.18);
+    border-radius: 10px; padding: 9px 12px; font-size: 12px; line-height: 1.48;
+    color: #f5f5f5; z-index: 20; pointer-events: auto; max-width: calc(100% - 32px);
+    backdrop-filter: blur(4px);
+  }
+  .hud-cat-badge {
+    display: inline-flex; align-items: center; gap: 4px;
+    background: rgba(255,193,7,0.2); border: 1px solid #ffc107; color: #ffc107;
+    padding: 1px 7px; border-radius: 6px; font-weight: 700; cursor: pointer;
+    margin-bottom: 3px;
+  }
+
+  /* Camera Zoom Bar */
+  .cam-zoom-bar {
+    position: absolute; bottom: calc(max(20px, env(safe-area-inset-bottom)) + 26px);
+    left: 50%; transform: translateX(-50%);
+    display: flex; gap: 8px; z-index: 20;
+  }
+  .zoom-pill {
+    background: rgba(0,0,0,0.6); color: #fff; border: 1px solid rgba(255,255,255,0.45);
+    border-radius: 20px; padding: 6px 13px; font-size: 12px; font-weight: 700; cursor: pointer;
+  }
+  .zoom-pill.active { background: #ffc107; color: #000; border-color: #ffc107; }
+
+  /* Camera Bottom Right FABs */
+  .cam-fab-group {
+    position: absolute; right: 24px; bottom: calc(max(16px, env(safe-area-inset-bottom)) + 16px);
+    display: flex; align-items: center; gap: 12px; z-index: 25;
+  }
+  .fab-btn {
+    width: 58px; height: 58px; border-radius: 50%; border: none;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; box-shadow: 0 4px 16px rgba(0,0,0,0.6);
+    font-size: 24px; transition: transform 0.1s ease;
+  }
+  .fab-btn:active { transform: scale(0.93); }
+  .fab-shutter { background: #ffc107; color: #000; border: 3px solid #fff; width: 64px; height: 64px; }
+  .fab-map { background: #2979ff; color: #fff; position: relative; }
+  .photo-count-badge {
+    position: absolute; top: -4px; right: -4px; background: #00e676; color: #000;
+    font-size: 11px; font-weight: 800; min-width: 22px; height: 22px;
+    border-radius: 11px; padding: 0 5px; display: flex; align-items: center; justify-content: center;
+    border: 2px solid #000;
+  }
+
+  /* ================= DASHBOARD SCREEN ================= */
+  #dashboard-screen { background: #0d0d11; }
+  .dash-appbar {
+    height: 50px; background: #050507; border-bottom: 1px solid #26262e;
+    display: flex; align-items: center; padding: 0 8px; gap: 5px;
+    overflow-x: auto; white-space: nowrap; flex-shrink: 0;
+  }
+  .top-chip-btn {
+    background: rgba(255,255,255,0.08); color: #fff; border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 7px; padding: 5px 8px; font-size: 11.5px; font-weight: 700;
+    cursor: pointer; display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0;
+  }
+  .top-chip-btn.amber { background: rgba(255,193,7,0.14); border-color: rgba(255,193,7,0.7); color: #ffc107; }
+  .top-chip-btn.green { background: rgba(105,240,174,0.12); border-color: rgba(105,240,174,0.65); color: #69f0ae; }
+  .top-chip-btn.blue { background: rgba(64,196,255,0.13); border-color: rgba(64,196,255,0.65); color: #40c4ff; }
+  .top-select {
+    background: #1a1b20; color: #fff; border: 1px solid rgba(255,255,255,0.22);
+    border-radius: 7px; padding: 4px 6px; font-size: 11.5px; font-weight: 700; cursor: pointer;
+  }
+
+  /* Split Area */
+  #dash-split-container {
+    flex: 1; display: flex; flex-direction: row; overflow: hidden; position: relative;
+  }
+  #dash-left-area {
+    flex: 0 0 50%; display: flex; flex-direction: row; overflow: hidden;
+    min-width: 15%; min-height: 15%; position: relative; background: #000;
+  }
+  .photo-viewer-pane {
+    flex: 1; position: relative; overflow: hidden; background: #000;
+    display: flex; align-items: center; justify-content: center;
+    border-right: 1px solid #222; border-bottom: 1px solid #222;
+    touch-action: none;
+  }
+  .photo-viewer-pane img {
+    max-width: 100%; max-height: 100%; object-fit: contain;
+    transform-origin: center center; pointer-events: none;
+  }
+  #dash-divider {
+    flex: 0 0 14px; background: #191a20;
+    border-left: 1px solid #343642; border-right: 1px solid #343642;
+    display: flex; align-items: center; justify-content: center;
+    cursor: col-resize; touch-action: none; z-index: 40;
+  }
+  #dash-divider .grip-pill {
+    width: 4px; height: 46px; background: #ffc107; border-radius: 4px; opacity: 0.85;
+  }
+  #dash-divider.dragging { background: rgba(255,193,7,0.28); }
+
+  #dash-map-area { flex: 1; position: relative; overflow: hidden; background: #16181f; }
+  #leaflet-map { width: 100%; height: 100%; z-index: 1; }
+
+  @media (max-aspect-ratio: 1/1) {
+    #dash-split-container { flex-direction: column; }
+    #dash-left-area { flex-direction: column; }
+    #dash-divider {
+      cursor: row-resize; border-left: none; border-right: none;
+      border-top: 1px solid #343642; border-bottom: 1px solid #343642;
+    }
+    #dash-divider .grip-pill { width: 46px; height: 4px; }
+  }
+
+  /* Photo Pane Overlays */
+  .pane-top-left {
+    position: absolute; top: 8px; left: 8px; z-index: 15;
+    display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  }
+  .pane-top-right {
+    position: absolute; top: 8px; right: 8px; z-index: 15;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .badge-before {
+    background: #e65100; color: #fff; font-size: 11px; font-weight: 800;
+    padding: 4px 8px; border-radius: 6px;
+  }
+  .badge-after {
+    background: #1b5e20; color: #fff; border: 1px solid #69f0ae;
+    font-size: 11px; font-weight: 800; padding: 4px 8px; border-radius: 6px;
+  }
+  .pane-action-btn {
+    background: rgba(0,0,0,0.82); color: #fff; border: 1.2px solid #ffc107;
+    border-radius: 8px; padding: 5px 9px; font-size: 11.5px; font-weight: 700;
+    cursor: pointer; display: inline-flex; align-items: center; gap: 4px;
+  }
+  .pane-action-btn.green { background: rgba(27,94,32,0.92); border-color: #69f0ae; color: #fff; }
+  .pane-del-btn {
+    width: 30px; height: 30px; border-radius: 50%; background: rgba(0,0,0,0.85);
+    border: 1.5px solid #ff5252; color: #ff5252; font-size: 15px; font-weight: 800;
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+  }
+  .memo-bar {
+    position: absolute; left: 10px; right: 10px; bottom: 6px; z-index: 16;
+    background: rgba(20,21,26,0.94); border: 1.2px solid rgba(255,193,7,0.75);
+    border-radius: 8px; padding: 4px 10px; display: flex; align-items: center; gap: 6px;
+  }
+  .memo-bar input {
+    flex: 1; background: transparent; border: none; color: #fff;
+    font-size: 12.5px; outline: none; padding: 4px 0;
+  }
+
+  /* Empty State */
+  #empty-photo-state {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 10px; padding: 20px;
+    background: #0b0c10; z-index: 20; text-align: center;
+  }
+
+  /* Blueprint Editor Panel */
+  #bp-editor-pane {
+    position: absolute; inset: 0; background: #14161d; z-index: 25;
+    padding: 10px 12px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px;
+  }
+  .bp-tab-strip {
+    display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; align-items: center;
+  }
+  .bp-tab-item {
+    display: inline-flex; align-items: center; gap: 5px;
+    background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 6px; padding: 4px 8px; font-size: 11.5px; color: #fff; flex-shrink: 0;
+  }
+  .bp-tab-item.active { background: rgba(255,193,7,0.22); border-color: #ffc107; color: #ffc107; font-weight: 700; }
+  .bp-slider-row {
+    display: flex; align-items: center; gap: 5px; font-size: 11.5px;
+  }
+  .bp-slider-row input[type="range"] { flex: 1; accent-color: #ffc107; }
+  .fine-btn {
+    background: rgba(255,255,255,0.1); color: #fff; border: 1px solid rgba(255,255,255,0.24);
+    border-radius: 5px; padding: 4px 7px; font-size: 11px; font-weight: 700; cursor: pointer;
+  }
+
+  /* Map Floating Controls */
+  .map-floating-top {
+    position: absolute; top: 10px; right: 10px; z-index: 500;
+    display: flex; gap: 6px; flex-wrap: wrap;
+  }
+  .map-float-btn {
+    background: rgba(12,14,18,0.88); color: #fff; border: 1.2px solid rgba(255,255,255,0.45);
+    border-radius: 8px; padding: 6px 10px; font-size: 11.5px; font-weight: 700;
+    cursor: pointer; display: inline-flex; align-items: center; gap: 4px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+  }
+  .map-float-btn.active-green { background: #69f0ae; color: #000; border-color: #69f0ae; }
+  .map-float-btn.active-amber { background: #ffc107; color: #000; border-color: #ffc107; }
+
+  /* Blueprint Gesture Catcher on Map */
+  #bp-gesture-layer {
+    position: absolute; inset: 0; z-index: 450; touch-action: none;
+    cursor: move; background: rgba(255,193,7,0.03);
+    border: 2px dashed rgba(255,193,7,0.65);
+  }
+
+  /* Thumbnail Strip */
+  #thumb-strip {
+    height: 84px; background: #070709; border-top: 1px solid #25262e;
+    display: flex; align-items: center; overflow-x: auto; padding: 4px 8px; gap: 6px;
+    flex-shrink: 0; padding-bottom: max(4px, env(safe-area-inset-bottom));
+  }
+  .thumb-card {
+    position: relative; width: 70px; height: 70px; flex-shrink: 0;
+    border: 3px solid transparent; border-radius: 6px; overflow: hidden; cursor: pointer;
+    background: #1a1a1a;
+  }
+  .thumb-card.active { border-color: #ffc107; }
+  .thumb-card img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .thumb-after-tag {
+    position: absolute; right: 2px; bottom: 2px; background: #00c853; color: #fff;
+    font-size: 9px; font-weight: 800; padding: 1px 4px; border-radius: 4px;
+  }
+
+  /* Modals */
+  .modal-backdrop {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.72);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 90000; padding: 16px;
+  }
+  .modal-card {
+    background: #1b1d24; border: 1px solid #383b47; border-radius: 14px;
+    width: 100%; max-width: 440px; max-height: 88vh; overflow-y: auto;
+    padding: 16px; color: #fff; box-shadow: 0 12px 40px rgba(0,0,0,0.8);
+  }
+  .modal-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding-bottom: 10px; border-bottom: 1px solid rgba(255,255,255,0.14);
+    margin-bottom: 12px;
+  }
+  .modal-title { font-size: 15px; font-weight: 800; color: #ffc107; }
+  .modal-close {
+    background: transparent; border: none; color: #aaa; font-size: 20px; cursor: pointer;
+  }
+  .list-option-btn {
+    width: 100%; text-align: left; background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.14); border-radius: 10px;
+    padding: 11px 12px; color: #fff; cursor: pointer; margin-bottom: 8px;
+    display: flex; align-items: flex-start; gap: 10px;
+  }
+  .list-option-btn:hover { background: rgba(255,255,255,0.11); }
+  .list-option-title { font-size: 13.5px; font-weight: 800; margin-bottom: 3px; display: block; }
+  .list-option-sub { font-size: 11.5px; color: #b0b5c0; display: block; line-height: 1.35; }
+</style>
+</head>
+<body>
+
+<div id="toast-banner" class="hidden"></div>
+<div id="loading-overlay" class="hidden">
+  <div class="spinner"></div>
+  <div id="loading-msg" style="margin-top:12px; font-size:13.5px; font-weight:700; color:#fff;">처리 중입니다...</div>
+</div>
+
+<!-- Hidden File Inputs -->
+<input type="file" id="native-camera-input" accept="image/*" capture="environment" class="hidden">
+<input type="file" id="gallery-multi-input" accept="image/*" multiple class="hidden">
+<input type="file" id="after-gallery-input" accept="image/*" class="hidden">
+<input type="file" id="blueprint-file-input" accept="image/*" class="hidden">
+<input type="file" id="project-import-input" accept=".html,.htm,.zip,text/html,application/zip" class="hidden">
+
+<!-- ================= 1. CAMERA SCREEN ================= -->
+<div id="camera-screen" class="view-screen">
+  <div class="cam-top-bar">
+    <div class="ratio-group">
+      <button type="button" class="ratio-btn active" id="ratio-btn-16-9" onclick="setAspectRatioMode('16:9')">16:9</button>
+      <button type="button" class="ratio-btn" id="ratio-btn-4-3" onclick="setAspectRatioMode('4:3')">4:3</button>
+      <button type="button" class="ratio-btn" id="ratio-btn-1-1" onclick="setAspectRatioMode('1:1')">1:1</button>
+    </div>
+    <div class="cam-util-group">
+      <button type="button" class="cam-icon-btn" id="sensor-perm-btn" onclick="requestIosSensorsAndGps()" title="아이폰 나침반·GPS 센서 활성화">🧭 센서ON</button>
+      <button type="button" class="cam-icon-btn" id="switch-cam-btn" onclick="switchCameraFacing()" title="전면/후면 카메라 전환">🔄 카메라전환</button>
+    </div>
+  </div>
+
+  <div id="after-mode-banner" class="hidden">
+    <div style="font-size:12px; font-weight:700; color:#fff;">
+      🛠️ [조치후 사진 촬영 모드] 촬영하면 조치전·조치후·지도 3등분으로 등록됩니다
+    </div>
+    <button type="button" onclick="cancelPendingAfterMode()" style="background:transparent; border:none; color:#fff; font-size:16px; cursor:pointer;">✕</button>
+  </div>
+
+  <div id="camera-stage">
+    <div id="video-frame-wrap">
+      <video id="cam-video" autoplay playsinline muted></video>
+      <div id="cam-fallback-box" class="hidden">
+        <div style="font-size:38px; margin-bottom:10px;">📷</div>
+        <div style="font-size:15px; font-weight:800; color:#ffc107; margin-bottom:6px;">브라우저 실시간 카메라 연결 안내</div>
+        <div id="cam-fallback-reason" style="font-size:12px; color:#ccc; max-width:320px; line-height:1.45; margin-bottom:14px;">
+          카메라 권한이 없거나 보안 연결(HTTPS)이 아닌 경우 아래 기본 카메라 촬영 버튼을 눌러 즉시 촬영할 수 있습니다.
+        </div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap; justify-content:center;">
+          <button type="button" onclick="startLiveCamera()" style="background:#ffc107; color:#000; border:none; border-radius:8px; padding:9px 14px; font-size:12.5px; font-weight:800; cursor:pointer;">🔄 실시간 카메라 다시 시도</button>
+          <button type="button" onclick="triggerNativeCameraFallback()" style="background:#00e676; color:#000; border:none; border-radius:8px; padding:9px 14px; font-size:12.5px; font-weight:800; cursor:pointer;">📸 기기 기본 카메라로 촬영</button>
+        </div>
+      </div>
+    </div>
+    <div id="shutter-flash"></div>
+  </div>
+
+  <div id="cam-hud-box">
+    <div class="hud-cat-badge" onclick="openCategorySelectorModal(true)" title="클릭하여 촬영 기본 카테고리 변경">
+      <span>📁 카테고리:</span>
+      <span id="hud-cat-label">미분류</span>
+      <span>▾</span>
+    </div>
+    <div id="hud-loc-lines">위도: 수신 대기 중...<br>경도: 수신 대기 중...<br>표고: 0.0m</div>
+    <div id="hud-sensor-line">방위각: 0.0° (N 북) | 피치각: 0.0° | 배율: 1.0x</div>
+    <div id="hud-time-line">시간: -</div>
+  </div>
+
+  <div class="cam-zoom-bar">
+    <button type="button" class="zoom-pill" id="zoom-btn-06" onclick="setCameraZoomLevel(0.6)">0.6x</button>
+    <button type="button" class="zoom-pill active" id="zoom-btn-10" onclick="setCameraZoomLevel(1.0)">1.0x</button>
+    <button type="button" class="zoom-pill" id="zoom-btn-20" onclick="setCameraZoomLevel(2.0)">2.0x</button>
+  </div>
+
+  <div class="cam-fab-group">
+    <button type="button" class="fab-btn fab-shutter" id="shutter-btn" onclick="handleShutterClick()" title="사진 촬영">📷</button>
+    <button type="button" class="fab-btn fab-map" id="open-dash-btn" onclick="openDashboardScreen()" title="지도 및 사진 대시보드 열기">
+      🗺️
+      <span class="photo-count-badge" id="cam-photo-count">0</span>
+    </button>
+  </div>
+</div>
+
+<!-- ================= 2. GALLERY & MAP DASHBOARD SCREEN ================= -->
+<div id="dashboard-screen" class="view-screen hidden">
+  <div class="dash-appbar">
+    <button type="button" class="top-chip-btn" onclick="closeDashboardToCamera()" title="카메라 화면으로 돌아가기">⬅ 카메라</button>
+    <select id="date-filter-select" class="top-select" onchange="onDateFilterChange(this.value)">
+      <option value="전체 보기">전체날짜</option>
+    </select>
+    <button type="button" class="top-chip-btn amber" id="cat-filter-btn" onclick="openCategoryFilterModal()">
+      <span id="cat-filter-label">전체분류(0)</span> ▾
+    </button>
+    <button type="button" class="top-chip-btn green" onclick="triggerGalleryMultiImport()">➕ 사진</button>
+    <button type="button" class="top-chip-btn blue" onclick="openExportImportModal()">📤 공유·저장</button>
+    <button type="button" class="top-chip-btn amber" onclick="openBlueprintMenuModal()">📐 도면</button>
+    <button type="button" class="top-chip-btn hidden" id="bp-layer-quick-btn" onclick="openBlueprintLayerModal()" title="층별·구역별 도면 켜기/끄기">📑 레이어</button>
+  </div>
+
+  <div id="dash-split-container">
+    <div id="dash-left-area">
+      <!-- Before / Main Photo Pane -->
+      <div class="photo-viewer-pane" id="main-photo-pane">
+        <div class="pane-top-left">
+          <span id="before-pane-badge" class="badge-before hidden">조치전</span>
+          <button type="button" class="pane-action-btn" id="active-photo-cat-btn" onclick="openCategorySelectorModal(false)">
+            <span id="active-photo-cat-txt">미분류</span> ▾
+          </button>
+        </div>
+        <div class="pane-top-right">
+          <button type="button" class="pane-action-btn" onclick="saveCurrentPhotoToDevice(false)" title="현재 사진을 기기/사진첩에 저장">💾 저장</button>
+          <button type="button" class="pane-action-btn green" id="add-after-btn" onclick="openAfterPhotoModal()">🛠️ 조치후 촬영</button>
+          <button type="button" class="pane-del-btn" onclick="deleteCurrentPhoto()" title="이 사진 삭제">✕</button>
+        </div>
+        <img id="dash-main-img" src="" alt="현장 사진"/>
+        <div class="memo-bar" id="main-memo-bar">
+          <span style="color:#ffc107;">📝</span>
+          <input type="text" id="main-memo-input" placeholder="사진 내용을 자유롭게 입력하세요 (자동 저장)" oninput="onMemoInput(this.value)"/>
+        </div>
+      </div>
+
+      <!-- After Photo Pane (3-split mode) -->
+      <div class="photo-viewer-pane hidden" id="after-photo-pane">
+        <div class="pane-top-left">
+          <span class="badge-after">✓ 조치후 완료</span>
+        </div>
+        <div class="pane-top-right">
+          <button type="button" class="pane-action-btn" onclick="saveCurrentPhotoToDevice(true)" title="조치후 사진을 기기/사진첩에 저장">💾 저장</button>
+          <button type="button" class="pane-action-btn green" onclick="openAfterPhotoModal()">🔄 조치후 변경</button>
+          <button type="button" class="pane-del-btn" onclick="deleteAfterPhotoOnly()" title="조치후 사진만 삭제">✕</button>
+        </div>
+        <img id="dash-after-img" src="" alt="조치후 사진"/>
+        <div class="memo-bar" id="after-memo-bar">
+          <span style="color:#ffc107;">📝</span>
+          <input type="text" id="after-memo-input" placeholder="사진 내용을 자유롭게 입력하세요 (자동 저장)" oninput="onMemoInput(this.value)"/>
+        </div>
+      </div>
+
+      <!-- Empty State -->
+      <div id="empty-photo-state" class="hidden">
+        <div style="font-size:36px;">📍</div>
+        <div style="font-size:14px; font-weight:700; color:#ccc;">저장된 현장 사진이 없습니다.</div>
+        <div style="display:flex; flex-direction:column; gap:8px; width:240px; margin-top:6px;">
+          <button type="button" onclick="closeDashboardToCamera()" style="background:#ffc107; color:#000; border:none; border-radius:8px; padding:10px; font-size:12.5px; font-weight:800; cursor:pointer;">📷 카메라로 현장 사진 촬영하기</button>
+          <button type="button" onclick="triggerGalleryMultiImport()" style="background:#29b6f6; color:#000; border:none; border-radius:8px; padding:10px; font-size:12.5px; font-weight:800; cursor:pointer;">🖼️ 갤러리에서 기존 사진 불러오기</button>
+          <button type="button" onclick="triggerProjectFileImport()" style="background:#00e676; color:#000; border:none; border-radius:8px; padding:10px; font-size:12.5px; font-weight:800; cursor:pointer;">📥 공유받은 HTML · ZIP 업로드</button>
+        </div>
+      </div>
+
+      <!-- Blueprint Editor Control Box -->
+      <div id="bp-editor-pane" class="hidden">
+        <div class="bp-tab-strip" id="bp-editor-tabs"></div>
+        <div style="display:flex; gap:6px;">
+          <button type="button" id="bp-mode-move-bp" onclick="setBpTouchMode(true)" style="flex:1; background:#ffc107; color:#000; border:none; border-radius:7px; padding:7px; font-size:12px; font-weight:800; cursor:pointer;">✋ 도면이동 모드</button>
+          <button type="button" id="bp-mode-move-map" onclick="setBpTouchMode(false)" style="flex:1; background:#262934; color:#ccc; border:none; border-radius:7px; padding:7px; font-size:12px; font-weight:800; cursor:pointer;">🗺️ 지도이동 모드</button>
+          <button type="button" onclick="finishBlueprintEditMode()" style="background:#00c853; color:#fff; border:none; border-radius:7px; padding:7px 14px; font-size:12px; font-weight:800; cursor:pointer;">✓ 저장</button>
+        </div>
+        <div id="bp-mode-hint" style="font-size:11px; color:#ffd54f;">
+          💡 지도 위에서 드래그하여 도면 이동, 두 손가락(또는 슬라이더)으로 크기·회전을 조절하세요.
+        </div>
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:4px;">
+          <button type="button" class="fine-btn" style="background:#455a64;" onclick="resetActiveBpToMapCenter()">🎯 화면중앙 초기화</button>
+          <div style="display:flex; align-items:center; gap:3px;">
+            <button type="button" class="fine-btn" id="bp-step-toggle-btn" onclick="toggleBpNudgeStep()">단위: 1m</button>
+            <button type="button" class="fine-btn" onclick="nudgeActiveBp(0, -1)">⬅</button>
+            <button type="button" class="fine-btn" onclick="nudgeActiveBp(1, 0)">⬆</button>
+            <button type="button" class="fine-btn" onclick="nudgeActiveBp(-1, 0)">⬇</button>
+            <button type="button" class="fine-btn" onclick="nudgeActiveBp(0, 1)">➡</button>
+          </div>
+        </div>
+        <div class="bp-slider-row">
+          <span id="bp-size-label" style="width:76px;">크기:200.0m</span>
+          <button type="button" class="fine-btn" onclick="adjustBpRadius(-5)">-5m</button>
+          <button type="button" class="fine-btn" onclick="adjustBpRadius(-0.5)">-0.5</button>
+          <input type="range" id="bp-size-slider" min="0" max="1" step="0.002" value="0.5" oninput="onBpSizeSliderInput(this.value)"/>
+          <button type="button" class="fine-btn" onclick="adjustBpRadius(0.5)">+0.5</button>
+          <button type="button" class="fine-btn" onclick="adjustBpRadius(5)">+5m</button>
+        </div>
+        <div class="bp-slider-row">
+          <span id="bp-rot-label" style="width:76px;">회전:0.0°</span>
+          <button type="button" class="fine-btn" onclick="adjustBpRotation(-2)">-2°</button>
+          <button type="button" class="fine-btn" onclick="adjustBpRotation(-0.2)">-0.2°</button>
+          <input type="range" id="bp-rot-slider" min="-180" max="180" step="0.1" value="0" oninput="onBpRotSliderInput(this.value)"/>
+          <button type="button" class="fine-btn" onclick="adjustBpRotation(0.2)">+0.2°</button>
+          <button type="button" class="fine-btn" onclick="adjustBpRotation(2)">+2°</button>
+        </div>
+        <div class="bp-slider-row">
+          <span id="bp-opa-label" style="width:76px;">투명도:50%</span>
+          <input type="range" id="bp-opa-slider" min="0.1" max="1.0" step="0.02" value="0.5" oninput="onBpOpaSliderInput(this.value)"/>
+        </div>
+      </div>
+    </div>
+
+    <!-- Resizable Divider -->
+    <div id="dash-divider" title="드래그하여 사진/지도 비율 조절 (더블클릭 초기화)">
+      <div class="grip-pill"></div>
+    </div>
+
+    <!-- Map Pane -->
+    <div id="dash-map-area">
+      <div id="leaflet-map"></div>
+      <div id="bp-gesture-layer" class="hidden"></div>
+      <div class="map-floating-top">
+        <button type="button" class="map-float-btn" id="move-photo-pos-btn" onclick="toggleMovePhotoPosMode()">📍 사진위치 이동</button>
+        <button type="button" class="map-float-btn" id="my-loc-toggle-btn" onclick="toggleMyLocationOnMap()">🎯 내 위치 표기</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="thumb-strip"></div>
+</div>
+
+<!-- ================= MODALS ================= -->
+<div id="modal-container" class="modal-backdrop hidden" onclick="onModalBackdropClick(event)">
+  <div class="modal-card" id="modal-card-content" onclick="event.stopPropagation()"></div>
+</div>
+
+<script>
+/* =========================================================================
+   STATE & INDEXED-DB PERSISTENCE (ALL STORAGE MODES SUPPORTED)
+   ========================================================================= */
+const DB_NAME = 'GpsFieldCamWebDB_V1';
+const DB_VERSION = 1;
+let dbInstance = null;
+
+let photos = []; // { id, b64, afterB64, lat, lng, alt, acc, azimuth, pitch, time, category, memo }
+let bps = [];    // { id, name, b64, lat, lng, baseRadius, sizeSlider, rotation, opacity, isVisible, cachedRotatedUrl, _bakedRot, _bakedOpa }
+let customCategories = new Set();
+let currentDefaultCategory = '미분류';
+
+let selectedIdx = 0;
+let dateFilter = '전체 보기';
+let categoryFilter = '전체 카테고리';
+
+// Camera & Sensor State
+let camStream = null;
+let camFacingMode = 'environment';
+let ratioMode = '16:9';
+let currentZoom = 1.0;
+let pendingAfterPhotoId = null;
+
+let currentPos = { lat: 37.4984, lng: 127.1324, alt: 25.0, acc: 8.0, hasFix: false };
+let currentHeading = 0.0;
+let currentPitch = 0.0;
+let sensorsActive = false;
+let geoWatchId = null;
+
+// Map & Blueprint Edit State
+let map = null;
+let markersLayer = null;
+let bpOverlayLayers = {};
+let myLocMarker = null;
+let showMyLocation = false;
+let movePhotoPosMode = false;
+
+let bpGlobalShow = true;
+let bpEditMode = false;
+let bpTouchModeIsBlueprint = true;
+let activeBpIdx = 0;
+let bpNudgeStepMeters = 1.0;
+
+let twoSplitRatio = 0.50;
+let threeSplitRatio = 0.667;
+
+/* ---------- Toast & Loading UI ---------- */
+let toastTimer = null;
+function showToast(msg, durationMs = 2600) {
+  const el = document.getElementById('toast-banner');
+  if (!el) return;
+  el.innerHTML = msg;
+  el.classList.remove('hidden');
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => {
+    el.classList.add('hidden');
+  }, durationMs);
+}
+
+function setLoading(show, msg = '처리 중입니다...') {
+  const ov = document.getElementById('loading-overlay');
+  const txt = document.getElementById('loading-msg');
+  if (txt) txt.textContent = msg;
+  if (ov) {
+    if (show) ov.classList.remove('hidden');
+    else ov.classList.add('hidden');
+  }
+}
+
+/* ---------- IndexedDB Setup ---------- */
+function openAppDatabase() {
+  return new Promise((resolve) => {
+    try {
+      const req = indexedDB.open(DB_NAME, DB_VERSION);
+      req.onupgradeneeded = (e) => {
+        const db = e.target.result;
+        if (!db.objectStoreNames.contains('kv')) {
+          db.createObjectStore('kv');
+        }
+      };
+      req.onsuccess = (e) => {
+        dbInstance = e.target.result;
+        resolve(dbInstance);
+      };
+      req.onerror = () => resolve(null);
+    } catch (_) {
+      resolve(null);
+    }
+  });
+}
+
+async function dbGet(key) {
+  if (!dbInstance) await openAppDatabase();
+  if (!dbInstance) return null;
+  return new Promise((resolve) => {
+    try {
+      const tx = dbInstance.transaction('kv', 'readonly');
+      const req = tx.objectStore('kv').get(key);
+      req.onsuccess = () => resolve(req.result ?? null);
+      req.onerror = () => resolve(null);
+    } catch (_) {
+      resolve(null);
+    }
+  });
+}
+
+async function dbSet(key, val) {
+  if (!dbInstance) await openAppDatabase();
+  if (!dbInstance) return;
+  return new Promise((resolve) => {
+    try {
+      const tx = dbInstance.transaction('kv', 'readwrite');
+      tx.objectStore('kv').put(val, key);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => resolve();
+    } catch (_) {
+      resolve();
+    }
+  });
+}
+
+async function persistAllState() {
+  await dbSet('photos', photos);
+  const cleanBps = bps.map(b => ({
+    id: b.id, name: b.name, b64: b.b64,
+    lat: b.lat, lng: b.lng,
+    baseRadius: b.baseRadius, sizeSlider: b.sizeSlider,
+    rotation: b.rotation, opacity: b.opacity, isVisible: b.isVisible
+  }));
+  await dbSet('bps', cleanBps);
+  await dbSet('customCategories', Array.from(customCategories));
+  await dbSet('defaultCategory', currentDefaultCategory);
+  await dbSet('bpGlobalShow', bpGlobalShow);
+  updatePhotoBadgeCount();
+}
+
+async function restoreAllState() {
+  const savedPhotos = await dbGet('photos');
+  if (Array.isArray(savedPhotos)) photos = savedPhotos;
+  const savedBps = await dbGet('bps');
+  if (Array.isArray(savedBps)) bps = savedBps;
+  const savedCats = await dbGet('customCategories');
+  if (Array.isArray(savedCats)) {
+    savedCats.forEach(c => { if (c && c !== '미분류') customCategories.add(c); });
+  }
+  const savedDefCat = await dbGet('defaultCategory');
+  if (typeof savedDefCat === 'string' && savedDefCat.trim()) {
+    currentDefaultCategory = savedDefCat.trim();
+  }
+  const savedBpShow = await dbGet('bpGlobalShow');
+  if (typeof savedBpShow === 'boolean') bpGlobalShow = savedBpShow;
+
+  photos.forEach(p => {
+    if (p.category && p.category !== '미분류') customCategories.add(p.category);
+  });
+  updateHudCategoryDisplay();
+  updatePhotoBadgeCount();
+}
+
+/* =========================================================================
+   CAMERA, SHUTTER SOUND, GPS & COMPASS/TILT SENSORS
+   ========================================================================= */
+let audioCtx = null;
+function playMechanicalShutterSound() {
+  try {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) return;
+    if (!audioCtx) audioCtx = new AudioContextClass();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+
+    const duration = 0.16;
+    const sampleRate = audioCtx.sampleRate;
+    const numSamples = Math.floor(sampleRate * duration);
+    const buffer = audioCtx.createBuffer(1, numSamples, sampleRate);
+    const data = buffer.getChannelData(0);
+
+    for (let i = 0; i < numSamples; i++) {
+      const t = i / sampleRate;
+      let amp = 0;
+      if (t < 0.028) {
+        const env = Math.exp(-t * 145.0);
+        const noise = (Math.random() * 2 - 1) * 0.85;
+        const tone = Math.sin(2 * Math.PI * 1500 * t) * 0.6 + Math.sin(2 * Math.PI * 3100 * t) * 0.45;
+        amp += (noise + tone) * env;
+      }
+      if (t >= 0.046 && t < 0.105) {
+        const dt = t - 0.046;
+        const env = Math.exp(-dt * 120.0);
+        const noise = (Math.random() * 2 - 1) * 0.95;
+        const tone = Math.sin(2 * Math.PI * 1150 * dt) * 0.6 + Math.sin(2 * Math.PI * 2450 * dt) * 0.5;
+        amp += (noise + tone) * env;
+      }
+      data[i] = Math.max(-1, Math.min(1, amp));
+    }
+
+    const src = audioCtx.createBufferSource();
+    src.buffer = buffer;
+    src.connect(audioCtx.destination);
+    src.start();
+  } catch (_) {}
+  if (navigator.vibrate) {
+    try { navigator.vibrate([35, 40, 25]); } catch (_) {}
+  }
+}
+
+function triggerShutterFlashUI() {
+  const fl = document.getElementById('shutter-flash');
+  if (!fl) return;
+  fl.style.opacity = '1';
+  setTimeout(() => { fl.style.opacity = '0'; }, 95);
+}
+
+function compassLabel(deg, korean = true) {
+  const enDirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+  const krDirs = ['N (북)', 'NE (북동)', 'E (동)', 'SE (남동)', 'S (남)', 'SW (남서)', 'W (서)', 'NW (북서)'];
+  const idx = Math.floor(((deg + 22.5) % 360) / 45) % 8;
+  return korean ? krDirs[idx] : enDirs[idx];
+}
+
+function formatNowTimestamp(dateObj = new Date()) {
+  const y = dateObj.getFullYear();
+  const m = String(dateObj.getMonth() + 1).padStart(2, '0');
+  const d = String(dateObj.getDate()).padStart(2, '0');
+  const hh = String(dateObj.getHours()).padStart(2, '0');
+  const mm = String(dateObj.getMinutes()).padStart(2, '0');
+  return `${y}-${m}-${d} ${hh}:${mm}`;
+}
+
+function updateCameraHudText() {
+  const locEl = document.getElementById('hud-loc-lines');
+  const senEl = document.getElementById('hud-sensor-line');
+  const timeEl = document.getElementById('hud-time-line');
+  if (locEl) {
+    const tag = `±${currentPos.acc.toFixed(1)}m`;
+    const vTag = `±${(currentPos.acc * 1.5).toFixed(1)}m`;
+    locEl.innerHTML =
+      `위도: ${currentPos.lat.toFixed(6)} (${tag})${currentPos.hasFix ? '' : ' [기본/추정]'}<br>` +
+      `경도: ${currentPos.lng.toFixed(6)} (${tag})<br>` +
+      `표고: ${currentPos.alt.toFixed(1)}m (${vTag})`;
+  }
+  if (senEl) {
+    const dirKr = compassLabel(currentHeading, true);
+    senEl.textContent = `방위각: ${currentHeading.toFixed(1)}° (${dirKr}) | 피치각: ${currentPitch.toFixed(1)}° | 배율: ${currentZoom.toFixed(1)}x`;
+  }
+  if (timeEl) {
+    timeEl.textContent = `시간: ${formatNowTimestamp()}`;
+  }
+}
+
+function startGpsWatch() {
+  if (!navigator.geolocation) return;
+  try {
+    if (geoWatchId !== null) navigator.geolocation.clearWatch(geoWatchId);
+    geoWatchId = navigator.geolocation.watchPosition(
+      (pos) => {
+        currentPos.lat = pos.coords.latitude;
+        currentPos.lng = pos.coords.longitude;
+        currentPos.alt = pos.coords.altitude !== null ? pos.coords.altitude : 25.0;
+        currentPos.acc = pos.coords.accuracy || 5.0;
+        currentPos.hasFix = true;
+        updateCameraHudText();
+        if (showMyLocation && map) updateMyLocationMarker();
+      },
+      () => { updateCameraHudText(); },
+      { enableHighAccuracy: true, maximumAge: 3000, timeout: 10000 }
+    );
+  } catch (_) {}
+}
+
+function handleDeviceOrientation(e) {
+  let heading = null;
+  if (typeof e.webkitCompassHeading === 'number') {
+    heading = e.webkitCompassHeading;
+  } else if (typeof e.alpha === 'number') {
+    heading = (360 - e.alpha) % 360;
+  }
+  if (heading !== null && !isNaN(heading)) {
+    currentHeading = ((heading % 360) + 360) % 360;
+  }
+  if (typeof e.beta === 'number' && !isNaN(e.beta)) {
+    currentPitch = Math.max(-90, Math.min(90, e.beta - 90));
+  }
+  sensorsActive = true;
+  const btn = document.getElementById('sensor-perm-btn');
+  if (btn) btn.classList.add('active');
+  updateCameraHudText();
+}
+
+async function requestIosSensorsAndGps() {
+  startGpsWatch();
+  try {
+    if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+      const res = await DeviceOrientationEvent.requestPermission();
+      if (res === 'granted') {
+        window.addEventListener('deviceorientation', handleDeviceOrientation, true);
+        showToast('🧭 아이폰 나침반·기울기 센서 및 GPS가 활성화되었습니다.');
+      } else {
+        showToast('⚠️ 센서 권한이 거부되었습니다. 사파리 설정에서 동작 및 방향 접근을 허용해 주세요.');
+      }
+    } else {
+      window.addEventListener('deviceorientationabsolute', handleDeviceOrientation, true);
+      window.addEventListener('deviceorientation', handleDeviceOrientation, true);
+      const btn = document.getElementById('sensor-perm-btn');
+      if (btn) btn.classList.add('active');
+      showToast('🧭 GPS 및 방향 센서가 활성화되었습니다.');
+    }
+  } catch (_) {
+    window.addEventListener('deviceorientation', handleDeviceOrientation, true);
+  }
+}
+
+async function startLiveCamera() {
+  const video = document.getElementById('cam-video');
+  const fallbackBox = document.getElementById('cam-fallback-box');
+  if (camStream) {
+    camStream.getTracks().forEach(t => t.stop());
+    camStream = null;
+  }
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    if (fallbackBox) fallbackBox.classList.remove('hidden');
+    return;
+  }
+  try {
+    const constraints = {
+      audio: false,
+      video: {
+        facingMode: { ideal: camFacingMode },
+        width: { ideal: 1920 },
+        height: { ideal: 1080 }
+      }
+    };
+    camStream = await navigator.mediaDevices.getUserMedia(constraints);
+    video.srcObject = camStream;
+    await video.play();
+    if (fallbackBox) fallbackBox.classList.add('hidden');
+    applyVideoFrameAspect();
+    applyHardwareOrDigitalZoom(currentZoom);
+  } catch (err) {
+    if (fallbackBox) fallbackBox.classList.remove('hidden');
+  }
+}
+
+function switchCameraFacing() {
+  camFacingMode = (camFacingMode === 'environment') ? 'user' : 'environment';
+  startLiveCamera();
+}
+
+function setAspectRatioMode(mode) {
+  ratioMode = mode;
+  ['16:9', '4:3', '1:1'].forEach(m => {
+    const id = 'ratio-btn-' + m.replace(':', '-');
+    const btn = document.getElementById(id);
+    if (btn) btn.classList.toggle('active', m === mode);
+  });
+  applyVideoFrameAspect();
+}
+
+function applyVideoFrameAspect() {
+  const stage = document.getElementById('camera-stage');
+  const wrap = document.getElementById('video-frame-wrap');
+  if (!stage || !wrap) return;
+  const sw = stage.clientWidth || window.innerWidth;
+  const sh = stage.clientHeight || window.innerHeight;
+  const landscape = sw >= sh;
+  let targetRatio = 1.0;
+  if (ratioMode === '1:1') {
+    targetRatio = 1.0;
+  } else if (ratioMode === '4:3') {
+    targetRatio = landscape ? (4.0 / 3.0) : (3.0 / 4.0);
+  } else {
+    targetRatio = landscape ? (16.0 / 9.0) : (9.0 / 16.0);
+  }
+  let w = sw;
+  let h = sw / targetRatio;
+  if (h > sh) {
+    h = sh;
+    w = sh * targetRatio;
+  }
+  wrap.style.width = `${Math.floor(w)}px`;
+  wrap.style.height = `${Math.floor(h)}px`;
+}
+
+function setCameraZoomLevel(z) {
+  currentZoom = z;
+  [0.6, 1.0, 2.0].forEach(val => {
+    const id = 'zoom-btn-' + String(val.toFixed(1)).replace('.', '');
+    const btn = document.getElementById(id);
+    if (btn) btn.classList.toggle('active', Math.abs(val - z) < 0.1);
+  });
+  applyHardwareOrDigitalZoom(z);
+  updateCameraHudText();
+}
+
+function applyHardwareOrDigitalZoom(z) {
+  const video = document.getElementById('cam-video');
+  if (!video) return;
+  let hwApplied = false;
+  if (camStream) {
+    try {
+      const track = camStream.getVideoTracks()[0];
+      if (track && typeof track.getCapabilities === 'function') {
+        const caps = track.getCapabilities();
+        if (caps && caps.zoom) {
+          const clamped = Math.max(caps.zoom.min || 1, Math.min(caps.zoom.max || 2, z));
+          track.applyConstraints({ advanced: [{ zoom: clamped }] });
+          hwApplied = true;
+        }
+      }
+    } catch (_) {}
+  }
+  if (!hwApplied) {
+    const scale = z < 1.0 ? 1.0 : z;
+    video.style.transform = `scale(${scale})`;
+  } else {
+    video.style.transform = 'scale(1)';
+  }
+}
+
+function triggerNativeCameraFallback() {
+  const inp = document.getElementById('native-camera-input');
+  if (inp) {
+    inp.value = '';
+    inp.click();
+  }
+}
+
+/* =========================================================================
+   JPEG GPSCAM_META INJECTION & STAMP DRAWING (100% FLUTTER COMPATIBLE)
+   ========================================================================= */
+function injectGpsCamMetaIntoJpegDataUri(jpegDataUri, metaObj) {
+  try {
+    const commaIdx = jpegDataUri.indexOf(',');
+    const rawB64 = commaIdx >= 0 ? jpegDataUri.substring(commaIdx + 1) : jpegDataUri;
+    const binStr = atob(rawB64);
+    const len = binStr.length;
+    if (len < 4 || binStr.charCodeAt(0) !== 0xFF || binStr.charCodeAt(1) !== 0xD8) {
+      return jpegDataUri;
+    }
+    const metaTag = 'GPSCAM_META:' + JSON.stringify(metaObj);
+    const metaBytes = new TextEncoder().encode(metaTag);
+    const comLen = metaBytes.length + 2;
+
+    const out = new Uint8Array(len + 4 + metaBytes.length);
+    out[0] = 0xFF;
+    out[1] = 0xD8;
+    out[2] = 0xFF;
+    out[3] = 0xFE;
+    out[4] = (comLen >> 8) & 0xFF;
+    out[5] = comLen & 0xFF;
+    out.set(metaBytes, 6);
+    for (let i = 2; i < len; i++) {
+      out[4 + metaBytes.length + i] = binStr.charCodeAt(i);
+    }
+
+    let binary = '';
+    const chunk = 32768;
+    for (let i = 0; i < out.length; i += chunk) {
+      binary += String.fromCharCode.apply(null, out.subarray(i, i + chunk));
+    }
+    return 'data:image/jpeg;base64,' + btoa(binary);
+  } catch (_) {
+    return jpegDataUri;
+  }
+}
+
+function renderStampedPhotoDataUri(sourceEl, srcW, srcH, isAfterShot) {
+  const landscape = srcW >= srcH;
+  let targetAspect = 1.0;
+  if (ratioMode === '1:1') {
+    targetAspect = 1.0;
+  } else if (ratioMode === '4:3') {
+    targetAspect = landscape ? (4.0 / 3.0) : (3.0 / 4.0);
+  } else {
+    targetAspect = landscape ? (16.0 / 9.0) : (9.0 / 16.0);
+  }
+
+  let cropW = srcW;
+  let cropH = srcH;
+  const curAspect = srcW / srcH;
+  if (curAspect > targetAspect) {
+    cropW = Math.round(srcH * targetAspect);
+  } else if (curAspect < targetAspect) {
+    cropH = Math.round(srcW / targetAspect);
+  }
+  const cropX = Math.floor((srcW - cropW) / 2);
+  const cropY = Math.floor((srcH - cropH) / 2);
+
+  // Normalize max dimension to 1920px like the Flutter app
+  const maxSide = Math.max(cropW, cropH);
+  const scale = maxSide > 1920 ? (1920 / maxSide) : 1.0;
+  const outW = Math.max(320, Math.round(cropW * scale));
+  const outH = Math.max(320, Math.round(cropH * scale));
+
+  const canvas = document.createElement('canvas');
+  canvas.width = outW;
+  canvas.height = outH;
+  const ctx = canvas.getContext('2d');
+
+  // Apply digital zoom if > 1.0
+  const z = currentZoom > 1.0 ? currentZoom : 1.0;
+  const zW = Math.round(cropW / z);
+  const zH = Math.round(cropH / z);
+  const zX = cropX + Math.floor((cropW - zW) / 2);
+  const zY = cropY + Math.floor((cropH - zH) / 2);
+
+  ctx.drawImage(sourceEl, zX, zY, zW, zH, 0, 0, outW, outH);
+
+  // Draw Watermark Stamp (matching Flutter app)
+  const nowStr = formatNowTimestamp();
+  const dirEn = compassLabel(currentHeading, false);
+  const hAcc = currentPos.acc;
+  const vAcc = hAcc * 1.5;
+
+  const lines = [
+    `Lat: ${currentPos.lat.toFixed(6)} (+-${hAcc.toFixed(1)}m)`,
+    `Lng: ${currentPos.lng.toFixed(6)} (+-${hAcc.toFixed(1)}m)`,
+    `Alt: ${currentPos.alt.toFixed(1)}m (+-${vAcc.toFixed(1)}m)`,
+    `Azimuth: ${currentHeading.toFixed(1)} deg (${dirEn})`,
+    `Pitch: ${currentPitch.toFixed(1)} deg`,
+    `Time: ${nowStr}${isAfterShot ? ' [AFTER]' : ''}`
+  ];
+
+  const fontSize = Math.max(15, Math.round(Math.min(outW, outH) * 0.026));
+  const lineH = Math.round(fontSize * 1.38);
+  const boxH = lines.length * lineH + 16;
+  const startY = Math.max(20, outH - boxH - 16);
+
+  ctx.save();
+  ctx.font = `bold ${fontSize}px sans-serif`;
+  let maxTextW = 0;
+  lines.forEach(l => {
+    const m = ctx.measureText(l).width;
+    if (m > maxTextW) maxTextW = m;
+  });
+
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.48)';
+  ctx.fillRect(14, startY - 8, maxTextW + 24, boxH);
+
+  ctx.fillStyle = 'rgb(255, 200, 50)';
+  ctx.shadowColor = 'rgba(0,0,0,0.9)';
+  ctx.shadowBlur = 3;
+  lines.forEach((line, idx) => {
+    ctx.fillText(line, 24, startY + (idx + 1) * lineH - 4);
+  });
+  ctx.restore();
+
+  const rawDataUri = canvas.toDataURL('image/jpeg', 0.90);
+  const metaJson = {
+    lat: currentPos.lat,
+    lng: currentPos.lng,
+    alt: currentPos.alt,
+    azimuth: currentHeading,
+    time: nowStr
+  };
+  return {
+    dataUri: injectGpsCamMetaIntoJpegDataUri(rawDataUri, metaJson),
+    nowStr
+  };
+}
+
+async function handleShutterClick() {
+  const video = document.getElementById('cam-video');
+  const fallbackBox = document.getElementById('cam-fallback-box');
+  if (!camStream || !video || video.readyState < 2 || (fallbackBox && !fallbackBox.classList.contains('hidden'))) {
+    triggerNativeCameraFallback();
+    return;
+  }
+
+  playMechanicalShutterSound();
+  triggerShutterFlashUI();
+
+  const vW = video.videoWidth || 1280;
+  const vH = video.videoHeight || 720;
+  const isAfterShot = Boolean(pendingAfterPhotoId);
+  const { dataUri, nowStr } = renderStampedPhotoDataUri(video, vW, vH, isAfterShot);
+  await registerCapturedPhoto(dataUri, nowStr, isAfterShot);
+}
+
+async function registerCapturedPhoto(dataUri, nowStr, isAfterShot) {
+  if (isAfterShot && pendingAfterPhotoId) {
+    const target = photos.find(p => p.id === pendingAfterPhotoId);
+    pendingAfterPhotoId = null;
+    updatePendingAfterBanner();
+    if (target) {
+      target.afterB64 = dataUri;
+      await persistAllState();
+      showToast('✅ 조치후 사진이 등록되었습니다! (조치전·조치후·지도 3등분 표시)');
+      openDashboardScreen(target.id);
+      return;
+    }
+  }
+
+  const newPhoto = {
+    id: 'photo_' + Date.now() + '_' + Math.floor(Math.random() * 1000),
+    b64: dataUri,
+    afterB64: '',
+    lat: currentPos.lat,
+    lng: currentPos.lng,
+    alt: currentPos.alt,
+    acc: currentPos.acc,
+    azimuth: currentHeading,
+    pitch: currentPitch,
+    time: nowStr,
+    category: currentDefaultCategory,
+    memo: ''
+  };
+  photos.push(newPhoto);
+  await persistAllState();
+  showToast(`📸 찰칵! [${currentDefaultCategory}] 카테고리로 저장되었습니다.`);
+}
+
+function updatePendingAfterBanner() {
+  const b = document.getElementById('after-mode-banner');
+  if (!b) return;
+  if (pendingAfterPhotoId) b.classList.remove('hidden');
+  else b.classList.add('hidden');
+}
+
+function cancelPendingAfterMode() {
+  const prevId = pendingAfterPhotoId;
+  pendingAfterPhotoId = null;
+  updatePendingAfterBanner();
+  openDashboardScreen(prevId);
+}
+
+/* ---------- Native Camera Input Handler ---------- */
+document.getElementById('native-camera-input').addEventListener('change', async (e) => {
+  const file = e.target.files && e.target.files[0];
+  if (!file) return;
+  setLoading(true, '📸 촬영한 사진에 GPS 스탬프를 합성하는 중...');
+  try {
+    const imgEl = await loadFileAsImageElement(file);
+    const isAfterShot = Boolean(pendingAfterPhotoId);
+    const { dataUri, nowStr } = renderStampedPhotoDataUri(imgEl, imgEl.naturalWidth || imgEl.width, imgEl.naturalHeight || imgEl.height, isAfterShot);
+    await registerCapturedPhoto(dataUri, nowStr, isAfterShot);
+  } catch (err) {
+    showToast('촬영 사진 처리 오류: ' + err.message);
+  } finally {
+    setLoading(false);
+  }
+});
+
+function loadFileAsImageElement(fileOrBlob) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(fileOrBlob);
+    const im = new Image();
+    im.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve(im);
+    };
+    im.onerror = (e) => {
+      URL.revokeObjectURL(url);
+      reject(e);
+    };
+    im.src = url;
+  });
+}
+
+/* =========================================================================
+   BINARY EXIF & GPSCAM_META PARSER (FOR GALLERY PHOTO IMPORT)
+   ========================================================================= */
+function parseExifAndMetaFromArrayBuffer(buf) {
+  const out = {};
+  const bytes = new Uint8Array(buf);
+  if (bytes.length < 14 || bytes[0] !== 0xFF || bytes[1] !== 0xD8) return out;
+
+  // 1. Check GPSCAM_META header comment
+  try {
+    const headLen = Math.min(bytes.length, 65536);
+    let ascii = '';
+    for (let i = 0; i < headLen; i++) ascii += String.fromCharCode(bytes[i]);
+    const idx = ascii.indexOf('GPSCAM_META:{');
+    if (idx >= 0) {
+      const endBrace = ascii.indexOf('}', idx);
+      if (endBrace > idx) {
+        const jsonStr = ascii.substring(idx + 'GPSCAM_META:'.length, endBrace + 1);
+        const m = JSON.parse(jsonStr);
+        if (m.lat != null && m.lng != null) {
+          out.lat = Number(m.lat);
+          out.lng = Number(m.lng);
+          if (m.alt != null) out.alt = Number(m.alt);
+          if (m.azimuth != null) out.azimuth = Number(m.azimuth);
+          if (m.time != null) out.dateTime = String(m.time);
+          return out;
+        }
+      }
+    }
+  } catch (_) {}
+
+  // 2. Parse standard TIFF/EXIF GPS IFD
+  let offset = 2;
+  while (offset + 4 < bytes.length) {
+    if (bytes[offset] !== 0xFF) break;
+    const marker = bytes[offset + 1];
+    if (marker === 0xDA || marker === 0xD9) break;
+    const segLen = (bytes[offset + 2] << 8) | bytes[offset + 3];
+    if (segLen < 2 || offset + 2 + segLen > bytes.length) break;
+
+    if (marker === 0xE1 && segLen >= 14 &&
+        bytes[offset + 4] === 0x45 && bytes[offset + 5] === 0x78 &&
+        bytes[offset + 6] === 0x69 && bytes[offset + 7] === 0x66) {
+      const tiffStart = offset + 10;
+      const segEnd = offset + 2 + segLen;
+      if (tiffStart + 8 <= segEnd) {
+        const little = (bytes[tiffStart] === 0x49 && bytes[tiffStart + 1] === 0x49);
+        const u16 = (p) => (p + 2 > segEnd) ? 0 : (little ? (bytes[p] | (bytes[p + 1] << 8)) : ((bytes[p] << 8) | bytes[p + 1]));
+        const u32 = (p) => (p + 4 > segEnd) ? 0 : (little
+          ? ((bytes[p]) | (bytes[p + 1] << 8) | (bytes[p + 2] << 16) | ((bytes[p + 3] << 24) >>> 0)) >>> 0
+          : (((bytes[p] << 24) >>> 0) | (bytes[p + 1] << 16) | (bytes[p + 2] << 8) | bytes[p + 3]) >>> 0);
+        const readRat = (p) => {
+          if (p + 8 > segEnd) return null;
+          const n = u32(p), d = u32(p + 4);
+          return d === 0 ? null : (n / d);
+        };
+        const readAscii = (p, cnt) => {
+          if (p < tiffStart || p + cnt > segEnd) return '';
+          let s = '';
+          for (let k = 0; k < cnt; k++) {
+            const c = bytes[p + k];
+            if (c === 0) break;
+            s += String.fromCharCode(c);
+          }
+          return s.trim();
+        };
+
+        const ifd0Pos = tiffStart + u32(tiffStart + 4);
+        if (ifd0Pos + 2 <= segEnd) {
+          const n0 = u16(ifd0Pos);
+          let gpsIfdRel = null;
+          let exifIfdRel = null;
+          for (let i = 0; i < n0; i++) {
+            const ePos = ifd0Pos + 2 + i * 12;
+            if (ePos + 12 > segEnd) break;
+            const tag = u16(ePos);
+            const cnt = u32(ePos + 4);
+            const valOff = u32(ePos + 8);
+            if (tag === 0x8825) gpsIfdRel = valOff;
+            else if (tag === 0x8769) exifIfdRel = valOff;
+            else if (tag === 0x0132 && cnt >= 10) {
+              const dt = readAscii(tiffStart + valOff, cnt);
+              if (dt) out.dateTime = dt;
+            }
+          }
+          if (exifIfdRel != null) {
+            const exifPos = tiffStart + exifIfdRel;
+            if (exifPos + 2 <= segEnd) {
+              const ne = u16(exifPos);
+              for (let i = 0; i < ne; i++) {
+                const ePos = exifPos + 2 + i * 12;
+                if (ePos + 12 > segEnd) break;
+                const tag = u16(ePos);
+                const cnt = u32(ePos + 4);
+                const valOff = u32(ePos + 8);
+                if ((tag === 0x9003 || tag === 0x9004) && cnt >= 10) {
+                  const dt = readAscii(tiffStart + valOff, cnt);
+                  if (dt) out.dateTime = dt;
+                }
+              }
+            }
+          }
+          if (gpsIfdRel != null) {
+            const gpsPos = tiffStart + gpsIfdRel;
+            if (gpsPos + 2 <= segEnd) {
+              const ng = u16(gpsPos);
+              let latRef = 'N', lngRef = 'E', altRef = 0;
+              let latAbs = null, lngAbs = null, altVal = null, azVal = null;
+              for (let i = 0; i < ng; i++) {
+                const ePos = gpsPos + 2 + i * 12;
+                if (ePos + 12 > segEnd) break;
+                const tag = u16(ePos);
+                const cnt = u32(ePos + 4);
+                const valOff = u32(ePos + 8);
+                if (tag === 0x0001) {
+                  const c = bytes[ePos + 8];
+                  if (c === 0x53 || c === 0x73) latRef = 'S';
+                } else if (tag === 0x0003) {
+                  const c = bytes[ePos + 8];
+                  if (c === 0x57 || c === 0x77) lngRef = 'W';
+                } else if (tag === 0x0005) {
+                  altRef = bytes[ePos + 8];
+                } else if (tag === 0x0002 && cnt >= 3) {
+                  const rPos = tiffStart + valOff;
+                  const d = readRat(rPos), m = readRat(rPos + 8), s = readRat(rPos + 16);
+                  if (d != null && m != null && s != null) latAbs = d + (m / 60.0) + (s / 3600.0);
+                } else if (tag === 0x0004 && cnt >= 3) {
+                  const rPos = tiffStart + valOff;
+                  const d = readRat(rPos), m = readRat(rPos + 8), s = readRat(rPos + 16);
+                  if (d != null && m != null && s != null) lngAbs = d + (m / 60.0) + (s / 3600.0);
+                } else if (tag === 0x0006 && cnt >= 1) {
+                  altVal = readRat(tiffStart + valOff);
+                } else if (tag === 0x0011 && cnt >= 1) {
+                  azVal = readRat(tiffStart + valOff);
+                }
+              }
+              if (latAbs != null && lngAbs != null && (latAbs > 0.0001 || lngAbs > 0.0001)) {
+                out.lat = (latRef === 'S') ? -latAbs : latAbs;
+                out.lng = (lngRef === 'W') ? -lngAbs : lngAbs;
+                if (altVal != null) out.alt = (altRef === 1) ? -Math.abs(altVal) : altVal;
+                if (azVal != null && !isNaN(azVal)) out.azimuth = ((azVal % 360) + 360) % 360;
+              }
+            }
+          }
+        }
+      }
+    }
+    offset += 2 + segLen;
+  }
+  return out;
+}
+
+async function normalizeImageFileToDataUri(file) {
+  const imgEl = await loadFileAsImageElement(file);
+  const w = imgEl.naturalWidth || imgEl.width;
+  const h = imgEl.naturalHeight || imgEl.height;
+  const maxSide = Math.max(w, h);
+  const scale = maxSide > 1920 ? (1920 / maxSide) : 1.0;
+  const outW = Math.round(w * scale);
+  const outH = Math.round(h * scale);
+  const canvas = document.createElement('canvas');
+  canvas.width = outW;
+  canvas.height = outH;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(imgEl, 0, 0, outW, outH);
+  return canvas.toDataURL('image/jpeg', 0.90);
+}
+
+/* =========================================================================
+   DASHBOARD, SPLIT BAR, PINCH ZOOM, AND LEAFLET MAP
+   ========================================================================= */
+function getVisiblePhotos() {
+  return photos.filter(p => {
+    const matchDate = (dateFilter === '전체 보기') || (p.time && p.time.startsWith(dateFilter));
+    const matchCat = (categoryFilter === '전체 카테고리') || (p.category === categoryFilter);
+    return matchDate && matchCat;
+  });
+}
+
+function getAllCategories() {
+  const s = new Set(customCategories);
+  photos.forEach(p => {
+    if (p.category && p.category !== '미분류') s.add(p.category);
+  });
+  const sorted = Array.from(s).sort((a, b) => a.localeCompare(b));
+  sorted.push('미분류');
+  return sorted;
+}
+
+function updatePhotoBadgeCount() {
+  const el = document.getElementById('cam-photo-count');
+  if (el) el.textContent = String(photos.length);
+}
+
+function updateHudCategoryDisplay() {
+  const el = document.getElementById('hud-cat-label');
+  if (el) el.textContent = currentDefaultCategory;
+}
+
+function openDashboardScreen(focusPhotoId = null) {
+  document.getElementById('camera-screen').classList.add('hidden');
+  document.getElementById('dashboard-screen').classList.remove('hidden');
+
+  initLeafletMapIfNeeded();
+  refreshFilterHeaderUI();
+
+  const vis = getVisiblePhotos();
+  if (focusPhotoId) {
+    const idx = vis.findIndex(p => p.id === focusPhotoId);
+    if (idx >= 0) selectedIdx = idx;
+    else selectedIdx = Math.max(0, vis.length - 1);
+  } else if (selectedIdx >= vis.length) {
+    selectedIdx = Math.max(0, vis.length - 1);
+  }
+
+  renderDashboardAll(true);
+}
+
+function closeDashboardToCamera() {
+  document.getElementById('dashboard-screen').classList.add('hidden');
+  document.getElementById('camera-screen').classList.remove('hidden');
+  applyVideoFrameAspect();
+}
+
+function initLeafletMapIfNeeded() {
+  if (map) {
+    setTimeout(() => map.invalidateSize(), 60);
+    return;
+  }
+  const initLat = photos.length > 0 ? photos[photos.length - 1].lat : currentPos.lat;
+  const initLng = photos.length > 0 ? photos[photos.length - 1].lng : currentPos.lng;
+
+  map = L.map('leaflet-map', { maxZoom: 22, zoomControl: false }).setView([initLat, initLng], 17);
+  L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+  const tileProviders = [
+    { url: 'https://xdworld.vworld.kr/2d/Base/service/{z}/{x}/{y}.png', maxNative: 19, attr: '© VWorld / 국토교통부' },
+    { url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', maxNative: 20, attr: '© CARTO / OpenStreetMap' },
+    { url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', maxNative: 19, attr: '© OpenStreetMap' }
+  ];
+  let providerIdx = 0;
+  let errCount = 0;
+  let activeTile = null;
+
+  function loadProvider(idx) {
+    if (idx >= tileProviders.length) return;
+    providerIdx = idx;
+    errCount = 0;
+    if (activeTile) {
+      try { map.removeLayer(activeTile); } catch (_) {}
+    }
+    const p = tileProviders[idx];
+    activeTile = L.tileLayer(p.url, { maxNativeZoom: p.maxNative, maxZoom: 22, attribution: p.attr, crossOrigin: true });
+    activeTile.on('tileerror', () => {
+      errCount++;
+      if (errCount >= 4 && providerIdx + 1 < tileProviders.length) {
+        loadProvider(providerIdx + 1);
+      }
+    });
+    activeTile.addTo(map);
+  }
+  loadProvider(0);
+
+  markersLayer = L.layerGroup().addTo(map);
+
+  map.on('click', async (e) => {
+    if (!movePhotoPosMode || bpEditMode) return;
+    const vis = getVisiblePhotos();
+    if (vis.length === 0) return;
+    const cur = vis[Math.min(selectedIdx, vis.length - 1)];
+    cur.lat = e.latlng.lat;
+    cur.lng = e.latlng.lng;
+    await persistAllState();
+    renderMapMarkers();
+    showToast('📍 현재 사진의 동그라미 위치가 터치한 지점으로 이동되었습니다.');
+  });
+}
+
+function refreshFilterHeaderUI() {
+  const dateSel = document.getElementById('date-filter-select');
+  if (dateSel) {
+    const daysSet = new Set();
+    photos.forEach(p => {
+      if (p.time && p.time.length >= 10) daysSet.add(p.time.substring(0, 10));
+    });
+    const sortedDays = Array.from(daysSet).sort((a, b) => b.localeCompare(a));
+    if (dateFilter !== '전체 보기' && !daysSet.has(dateFilter)) {
+      dateFilter = '전체 보기';
+    }
+    dateSel.innerHTML = `<option value="전체 보기">전체날짜</option>` +
+      sortedDays.map(d => `<option value="${d}" ${d === dateFilter ? 'selected' : ''}>${d.substring(5)}</option>`).join('');
+  }
+
+  const cats = getAllCategories();
+  if (categoryFilter !== '전체 카테고리' && !cats.includes(categoryFilter)) {
+    categoryFilter = '전체 카테고리';
+  }
+  const catBtnLbl = document.getElementById('cat-filter-label');
+  if (catBtnLbl) {
+    const cnt = (categoryFilter === '전체 카테고리')
+      ? photos.length
+      : photos.filter(p => p.category === categoryFilter).length;
+    const shortCat = (categoryFilter === '전체 카테고리') ? '전체분류' : categoryFilter;
+    catBtnLbl.textContent = `${shortCat}(${cnt})`;
+  }
+
+  const bpLayerBtn = document.getElementById('bp-layer-quick-btn');
+  if (bpLayerBtn) {
+    if (bps.length > 0) bpLayerBtn.classList.remove('hidden');
+    else bpLayerBtn.classList.add('hidden');
+  }
+}
+
+function onDateFilterChange(val) {
+  dateFilter = val;
+  const vis = getVisiblePhotos();
+  selectedIdx = Math.max(0, vis.length - 1);
+  renderDashboardAll(true);
+}
+
+function applySplitRatioLayout() {
+  const leftArea = document.getElementById('dash-left-area');
+  if (!leftArea) return;
+  const vis = getVisiblePhotos();
+  const activePhoto = vis.length > 0 ? vis[Math.min(selectedIdx, vis.length - 1)] : null;
+  const isThree = !bpEditMode && activePhoto && activePhoto.afterB64 && activePhoto.afterB64.length > 10;
+  const r = isThree ? threeSplitRatio : twoSplitRatio;
+  const pct = Math.min(85, Math.max(15, r * 100));
+  leftArea.style.flex = `0 0 ${pct.toFixed(1)}%`;
+  if (map) setTimeout(() => map.invalidateSize(), 40);
+}
+
+function renderDashboardAll(panToActive = false) {
+  refreshFilterHeaderUI();
+  const vis = getVisiblePhotos();
+  if (selectedIdx >= vis.length) selectedIdx = Math.max(0, vis.length - 1);
+  const activePhoto = vis.length > 0 ? vis[selectedIdx] : null;
+
+  const emptyEl = document.getElementById('empty-photo-state');
+  const mainPane = document.getElementById('main-photo-pane');
+  const afterPane = document.getElementById('after-photo-pane');
+  const bpPane = document.getElementById('bp-editor-pane');
+  const gestureLayer = document.getElementById('bp-gesture-layer');
+
+  if (bpEditMode) {
+    bpPane.classList.remove('hidden');
+    emptyEl.classList.add('hidden');
+    renderBlueprintEditorBox();
+    if (bpTouchModeIsBlueprint && bps[activeBpIdx]) {
+      gestureLayer.classList.remove('hidden');
+    } else {
+      gestureLayer.classList.add('hidden');
+    }
+  } else {
+    bpPane.classList.add('hidden');
+    gestureLayer.classList.add('hidden');
+    if (!activePhoto) {
+      emptyEl.classList.remove('hidden');
+      afterPane.classList.add('hidden');
+    } else {
+      emptyEl.classList.add('hidden');
+      document.getElementById('dash-main-img').src = activePhoto.b64;
+      document.getElementById('active-photo-cat-txt').textContent = activePhoto.category || '미분류';
+      document.getElementById('main-memo-input').value = activePhoto.memo || '';
+      document.getElementById('after-memo-input').value = activePhoto.memo || '';
+      resetMainPaneZoom();
+      resetAfterPaneZoom();
+
+      const hasAfter = Boolean(activePhoto.afterB64 && activePhoto.afterB64.length > 10);
+      const beforeBadge = document.getElementById('before-pane-badge');
+      const addAfterBtn = document.getElementById('add-after-btn');
+      const mainMemoBar = document.getElementById('main-memo-bar');
+
+      if (hasAfter) {
+        document.getElementById('dash-after-img').src = activePhoto.afterB64;
+        afterPane.classList.remove('hidden');
+        beforeBadge.classList.remove('hidden');
+        addAfterBtn.classList.add('hidden');
+        mainMemoBar.classList.add('hidden');
+      } else {
+        afterPane.classList.add('hidden');
+        beforeBadge.classList.add('hidden');
+        addAfterBtn.classList.remove('hidden');
+        mainMemoBar.classList.remove('hidden');
+      }
+    }
+  }
+
+  applySplitRatioLayout();
+  renderThumbnailStrip(vis);
+  renderMapMarkers();
+  syncBlueprintsToLeaflet();
+
+  if (panToActive && map) {
+    if (activePhoto) {
+      map.panTo([activePhoto.lat, activePhoto.lng]);
+    } else if (bps.length > 0) {
+      map.panTo([bps[activeBpIdx]?.lat || bps[0].lat, bps[activeBpIdx]?.lng || bps[0].lng]);
+    }
+  }
+}
+
+function renderThumbnailStrip(vis) {
+  const strip = document.getElementById('thumb-strip');
+  if (!strip) return;
+  if (vis.length === 0) {
+    strip.classList.add('hidden');
+    return;
+  }
+  strip.classList.remove('hidden');
+  strip.innerHTML = vis.map((p, i) => {
+    const hasAfter = Boolean(p.afterB64 && p.afterB64.length > 10);
+    return `
+      <div class="thumb-card ${i === selectedIdx ? 'active' : ''}" onclick="selectPhotoByIndex(${i})">
+        <img src="${p.b64}" alt="썸네일 ${i + 1}"/>
+        ${hasAfter ? '<span class="thumb-after-tag">조치후</span>' : ''}
+      </div>
+    `;
+  }).join('');
+}
+
+function selectPhotoByIndex(idx) {
+  const vis = getVisiblePhotos();
+  if (idx < 0 || idx >= vis.length) return;
+  selectedIdx = idx;
+  renderDashboardAll(true);
+}
+
+function renderMapMarkers() {
+  if (!map || !markersLayer) return;
+  markersLayer.clearLayers();
+  const vis = getVisiblePhotos();
+  const order = [];
+  for (let i = 0; i < vis.length; i++) {
+    if (i !== selectedIdx) order.push(i);
+  }
+  if (selectedIdx >= 0 && selectedIdx < vis.length) order.push(selectedIdx);
+
+  order.forEach(i => {
+    const p = vis[i];
+    const isSel = (i === selectedIdx);
+    const color = isSel ? '#2979ff' : '#f44336';
+    const zIdx = isSel ? 1000 : 100;
+    const noDir = (p.azimuth === undefined || p.azimuth < 0);
+    const rotStyle = noDir ? '' : `transform:rotate(${p.azimuth}deg);`;
+    const symbol = noDir ? '●' : '▲';
+    const fSize = noDir ? '12px' : '14px';
+
+    const icon = L.divIcon({
+      className: '',
+      iconSize: [28, 28],
+      iconAnchor: [14, 14],
+      html: `<div style="width:24px;height:24px;border-radius:50%;background:${color}4d;border:2.2px solid ${color};display:flex;align-items:center;justify-content:center;${rotStyle}">
+        <span style="color:${color};font-size:${fSize};font-weight:bold;">${symbol}</span>
+      </div>`
+    });
+
+    const m = L.marker([p.lat, p.lng], { icon, zIndexOffset: zIdx }).addTo(markersLayer);
+    m.on('click', () => {
+      // Cycle overlapping markers within 20px just like the Flutter app
+      const clickedPt = map.latLngToContainerPoint([p.lat, p.lng]);
+      const nearby = [];
+      for (let j = 0; j < vis.length; j++) {
+        const pt = map.latLngToContainerPoint([vis[j].lat, vis[j].lng]);
+        if (Math.hypot(clickedPt.x - pt.x, clickedPt.y - pt.y) <= 20.0) {
+          nearby.push(j);
+        }
+      }
+      let nextIdx = i;
+      if (nearby.length > 1 && nearby.includes(selectedIdx)) {
+        const pos = nearby.indexOf(selectedIdx);
+        nextIdx = nearby[(pos + 1) % nearby.length];
+      }
+      selectPhotoByIndex(nextIdx);
+    });
+  });
+}
+
+function onMemoInput(val) {
+  const vis = getVisiblePhotos();
+  if (vis.length === 0) return;
+  const active = vis[selectedIdx];
+  if (!active) return;
+  active.memo = val;
+  const m1 = document.getElementById('main-memo-input');
+  const m2 = document.getElementById('after-memo-input');
+  if (m1 && m1.value !== val) m1.value = val;
+  if (m2 && m2.value !== val) m2.value = val;
+  persistAllState();
+}
+
+async function deleteCurrentPhoto() {
+  const vis = getVisiblePhotos();
+  if (vis.length === 0) return;
+  const target = vis[selectedIdx];
+  photos = photos.filter(p => p.id !== target.id);
+  await persistAllState();
+  renderDashboardAll(true);
+  showToast('🗑️ 사진이 삭제되었습니다.');
+}
+
+async function deleteAfterPhotoOnly() {
+  const vis = getVisiblePhotos();
+  if (vis.length === 0) return;
+  const target = vis[selectedIdx];
+  target.afterB64 = '';
+  await persistAllState();
+  renderDashboardAll(false);
+  showToast('🗑️ 조치후 사진이 삭제되어 기본 2등분 화면으로 돌아왔습니다.');
+}
+
+function toggleMovePhotoPosMode() {
+  movePhotoPosMode = !movePhotoPosMode;
+  const btn = document.getElementById('move-photo-pos-btn');
+  if (btn) {
+    btn.classList.toggle('active-green', movePhotoPosMode);
+    btn.textContent = movePhotoPosMode ? '📍 사진이동 ON' : '📍 사진위치 이동';
+  }
+  if (movePhotoPosMode) {
+    showToast('📍 지도나 도면 위 원하는 위치를 터치하면 현재 사진의 동그라미가 그곳으로 이동합니다.');
+  }
+}
+
+function toggleMyLocationOnMap() {
+  showMyLocation = !showMyLocation;
+  const btn = document.getElementById('my-loc-toggle-btn');
+  if (btn) {
+    btn.classList.toggle('active-amber', showMyLocation);
+    btn.textContent = showMyLocation ? '🎯 내 위치 ON' : '🎯 내 위치 표기';
+  }
+  if (showMyLocation) {
+    startGpsWatch();
+    updateMyLocationMarker();
+    if (map) map.panTo([currentPos.lat, currentPos.lng]);
+  } else if (myLocMarker && map) {
+    map.removeLayer(myLocMarker);
+    myLocMarker = null;
+  }
+}
+
+function updateMyLocationMarker() {
+  if (!map || !showMyLocation) return;
+  const icon = L.divIcon({
+    className: '',
+    iconSize: [26, 26],
+    iconAnchor: [13, 13],
+    html: `<div style="width:26px;height:26px;border-radius:50%;background:rgba(105,240,174,0.35);border:2.5px solid #fff;display:flex;align-items:center;justify-content:center;">
+      <div style="width:12px;height:12px;border-radius:50%;background:#00e676;"></div>
+    </div>`
+  });
+  if (!myLocMarker) {
+    myLocMarker = L.marker([currentPos.lat, currentPos.lng], { icon, zIndexOffset: 2000 }).addTo(map);
+  } else {
+    myLocMarker.setLatLng([currentPos.lat, currentPos.lng]);
+  }
+}
+
+/* ---------- Pinch Zoom & Wheel Zoom for Photo Panes ---------- */
+function bindPaneZoom(paneId, imgId) {
+  const pane = document.getElementById(paneId);
+  const img = document.getElementById(imgId);
+  let scale = 1.0, tx = 0, ty = 0;
+  let sDist = 0, sScale = 1.0, dragging = false, sx = 0, sy = 0, lastTap = 0;
+
+  function apply() {
+    if (img) img.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
+  }
+  function reset() {
+    scale = 1.0; tx = 0; ty = 0; apply();
+  }
+  if (!pane || !img) return reset;
+
+  pane.addEventListener('touchstart', (e) => {
+    if (e.target.closest('button') || e.target.closest('input')) return;
+    if (e.touches.length === 2) {
+      dragging = false;
+      sDist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+      sScale = scale;
+    } else if (e.touches.length === 1) {
+      const now = Date.now();
+      if (now - lastTap < 280) {
+        scale = scale > 1.2 ? 1.0 : 2.5; tx = 0; ty = 0; apply(); lastTap = 0; return;
+      }
+      lastTap = now;
+      if (scale > 1.02) {
+        dragging = true;
+        sx = e.touches[0].clientX - tx;
+        sy = e.touches[0].clientY - ty;
+      }
+    }
+  }, { passive: true });
+
+  pane.addEventListener('touchmove', (e) => {
+    if (e.target.closest('input')) return;
+    if (e.touches.length === 2 && sDist > 0) {
+      e.preventDefault();
+      const d = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+      scale = Math.min(5.0, Math.max(1.0, sScale * (d / sDist)));
+      if (scale <= 1.02) { tx = 0; ty = 0; }
+      apply();
+    } else if (e.touches.length === 1 && dragging && scale > 1.02) {
+      e.preventDefault();
+      tx = e.touches[0].clientX - sx;
+      ty = e.touches[0].clientY - sy;
+      apply();
+    }
+  }, { passive: false });
+
+  pane.addEventListener('touchend', (e) => {
+    if (e.touches.length < 2) sDist = 0;
+    if (e.touches.length === 0) dragging = false;
+  });
+
+  pane.addEventListener('wheel', (e) => {
+    if (e.target.closest('input')) return;
+    e.preventDefault();
+    scale = Math.min(5.0, Math.max(1.0, scale + (e.deltaY < 0 ? 0.22 : -0.22)));
+    if (scale <= 1.02) { tx = 0; ty = 0; }
+    apply();
+  }, { passive: false });
+
+  return reset;
+}
+
+const resetMainPaneZoom = bindPaneZoom('main-photo-pane', 'dash-main-img');
+const resetAfterPaneZoom = bindPaneZoom('after-photo-pane', 'dash-after-img');
+
+/* ---------- Resizable Split Divider ---------- */
+(function initSplitDivider() {
+  const container = document.getElementById('dash-split-container');
+  const divider = document.getElementById('dash-divider');
+  let dragging = false;
+  let lastTap = 0;
+
+  function updateFromPointer(clientX, clientY) {
+    const rect = container.getBoundingClientRect();
+    const isCol = window.getComputedStyle(container).flexDirection === 'column';
+    const total = isCol ? rect.height : rect.width;
+    if (total <= 40) return;
+    const pos = isCol ? (clientY - rect.top) : (clientX - rect.left);
+    const ratio = Math.min(0.85, Math.max(0.15, pos / total));
+    const vis = getVisiblePhotos();
+    const activePhoto = vis.length > 0 ? vis[Math.min(selectedIdx, vis.length - 1)] : null;
+    const isThree = !bpEditMode && activePhoto && activePhoto.afterB64 && activePhoto.afterB64.length > 10;
+    if (isThree) threeSplitRatio = ratio;
+    else twoSplitRatio = ratio;
+    applySplitRatioLayout();
+  }
+
+  function resetSplitDefault() {
+    const vis = getVisiblePhotos();
+    const activePhoto = vis.length > 0 ? vis[Math.min(selectedIdx, vis.length - 1)] : null;
+    const isThree = !bpEditMode && activePhoto && activePhoto.afterB64 && activePhoto.afterB64.length > 10;
+    if (isThree) threeSplitRatio = 0.667;
+    else twoSplitRatio = 0.50;
+    applySplitRatioLayout();
+  }
+
+  divider.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    dragging = true;
+    divider.classList.add('dragging');
+  });
+  divider.addEventListener('dblclick', resetSplitDefault);
+  window.addEventListener('mousemove', (e) => {
+    if (!dragging) return;
+    updateFromPointer(e.clientX, e.clientY);
+  });
+  window.addEventListener('mouseup', () => {
+    if (!dragging) return;
+    dragging = false;
+    divider.classList.remove('dragging');
+  });
+
+  divider.addEventListener('touchstart', () => {
+    const now = Date.now();
+    if (now - lastTap < 300) {
+      resetSplitDefault();
+      lastTap = 0;
+      return;
+    }
+    lastTap = now;
+    dragging = true;
+    divider.classList.add('dragging');
+  }, { passive: true });
+  window.addEventListener('touchmove', (e) => {
+    if (!dragging || e.touches.length === 0) return;
+    e.preventDefault();
+    updateFromPointer(e.touches[0].clientX, e.touches[0].clientY);
+  }, { passive: false });
+  window.addEventListener('touchend', () => {
+    if (!dragging) return;
+    dragging = false;
+    divider.classList.remove('dragging');
+  });
+})();
+
+/* =========================================================================
+   BLUEPRINT OVERLAYS & INTERACTIVE EDITOR
+   ========================================================================= */
+function getBpCurrentRadius(bp) {
+  return (bp.baseRadius || 200.0) * Math.pow(9.0, (bp.sizeSlider ?? 0.5) - 0.5);
+}
+
+function setBpRadiusDirectly(bp, newRadiusMeters) {
+  const clamped = Math.min(5000.0, Math.max(5.0, newRadiusMeters));
+  let newSlider = 0.5 + Math.log(clamped / bp.baseRadius) / Math.log(9.0);
+  if (newSlider < 0.05 || newSlider > 0.95) {
+    bp.baseRadius = clamped;
+    newSlider = 0.5;
+  }
+  bp.sizeSlider = Math.min(1.0, Math.max(0.0, newSlider));
+}
+
+function getBpBounds(bp) {
+  const rad = getBpCurrentRadius(bp);
+  const dLat = rad / 111320.0;
+  const cosLat = Math.max(0.1, Math.abs(Math.cos(bp.lat * Math.PI / 180.0)));
+  const dLng = rad / (111320.0 * cosLat);
+  return {
+    swLat: bp.lat - dLat,
+    swLng: bp.lng - dLng,
+    neLat: bp.lat + dLat,
+    neLng: bp.lng + dLng
+  };
+}
+
+async function bakeBlueprintRotatedUrl(bp) {
+  if (bp.cachedRotatedUrl && bp._bakedRot === bp.rotation && bp._bakedOpa === bp.opacity) {
+    return bp.cachedRotatedUrl;
+  }
+  return new Promise((resolve) => {
+    const im = new Image();
+    im.onload = () => {
+      const size = 900;
+      const pad = 40;
+      const inner = size - pad * 2;
+      const canvas = document.createElement('canvas');
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, size, size);
+      ctx.save();
+      ctx.globalAlpha = Math.min(1.0, Math.max(0.1, bp.opacity ?? 0.5));
+      ctx.translate(size / 2, size / 2);
+      ctx.rotate((bp.rotation || 0) * Math.PI / 180.0);
+      const scale = Math.min(inner / im.width, inner / im.height);
+      const dw = im.width * scale;
+      const dh = im.height * scale;
+      ctx.drawImage(im, -dw / 2, -dh / 2, dw, dh);
+      ctx.restore();
+      bp.cachedRotatedUrl = canvas.toDataURL('image/png');
+      bp._bakedRot = bp.rotation;
+      bp._bakedOpa = bp.opacity;
+      resolve(bp.cachedRotatedUrl);
+    };
+    im.onerror = () => resolve(bp.b64);
+    im.src = bp.b64;
+  });
+}
+
+async function syncBlueprintsToLeaflet() {
+  if (!map) return;
+  // Remove overlays not active or when global show is off
+  const activeIds = new Set();
+  if (bpGlobalShow) {
+    for (let i = 0; i < bps.length; i++) {
+      const bp = bps[i];
+      if (!bp.isVisible) continue;
+      activeIds.add(bp.id);
+      const url = await bakeBlueprintRotatedUrl(bp);
+      const b = getBpBounds(bp);
+      const bounds = [[b.swLat, b.swLng], [b.neLat, b.neLng]];
+      if (bpOverlayLayers[bp.id]) {
+        bpOverlayLayers[bp.id].setUrl(url);
+        bpOverlayLayers[bp.id].setBounds(bounds);
+      } else {
+        bpOverlayLayers[bp.id] = L.imageOverlay(url, bounds, { opacity: 1.0, interactive: false }).addTo(map);
+      }
+    }
+  }
+  Object.keys(bpOverlayLayers).forEach(id => {
+    if (!activeIds.has(id)) {
+      try { map.removeLayer(bpOverlayLayers[id]); } catch (_) {}
+      delete bpOverlayLayers[id];
+    }
+  });
+}
+
+function renderBlueprintEditorBox() {
+  const tabsEl = document.getElementById('bp-editor-tabs');
+  if (!tabsEl) return;
+  if (activeBpIdx >= bps.length) activeBpIdx = Math.max(0, bps.length - 1);
+  const bp = bps[activeBpIdx];
+
+  tabsEl.innerHTML = bps.map((item, idx) => `
+    <div class="bp-tab-item ${idx === activeBpIdx ? 'active' : ''}">
+      <span style="cursor:pointer;" onclick="toggleSingleBpVisible(${idx})">${item.isVisible ? '👁️' : '🚫'}</span>
+      <span style="cursor:pointer;" onclick="selectActiveBp(${idx})" ondblclick="promptRenameBp(${idx})">${item.name}</span>
+      <span style="cursor:pointer; color:#ff5252; margin-left:3px;" onclick="deleteBlueprintAt(${idx})">✕</span>
+    </div>
+  `).join('') + `
+    <button type="button" class="fine-btn" style="border-color:#ffc107; color:#ffc107; flex-shrink:0;" onclick="triggerBlueprintFileSelect()">+ 도면추가</button>
+  `;
+
+  const moveBpBtn = document.getElementById('bp-mode-move-bp');
+  const moveMapBtn = document.getElementById('bp-mode-move-map');
+  if (moveBpBtn && moveMapBtn) {
+    moveBpBtn.style.background = bpTouchModeIsBlueprint ? '#ffc107' : '#262934';
+    moveBpBtn.style.color = bpTouchModeIsBlueprint ? '#000' : '#ccc';
+    moveMapBtn.style.background = !bpTouchModeIsBlueprint ? '#40c4ff' : '#262934';
+    moveMapBtn.style.color = !bpTouchModeIsBlueprint ? '#000' : '#ccc';
+  }
+
+  if (bp) {
+    const rad = getBpCurrentRadius(bp);
+    document.getElementById('bp-size-label').textContent = `크기:${rad.toFixed(1)}m`;
+    document.getElementById('bp-size-slider').value = bp.sizeSlider;
+    document.getElementById('bp-rot-label').textContent = `회전:${bp.rotation.toFixed(1)}°`;
+    document.getElementById('bp-rot-slider').value = bp.rotation;
+    document.getElementById('bp-opa-label').textContent = `투명도:${Math.round(bp.opacity * 100)}%`;
+    document.getElementById('bp-opa-slider').value = bp.opacity;
+  }
+}
+
+function selectActiveBp(idx) {
+  if (idx < 0 || idx >= bps.length) return;
+  activeBpIdx = idx;
+  bps[idx].isVisible = true;
+  bpGlobalShow = true;
+  persistAllState();
+  renderDashboardAll(false);
+}
+
+function toggleSingleBpVisible(idx) {
+  if (idx < 0 || idx >= bps.length) return;
+  bps[idx].isVisible = !bps[idx].isVisible;
+  if (bps[idx].isVisible) bpGlobalShow = true;
+  persistAllState();
+  renderDashboardAll(false);
+}
+
+function deleteBlueprintAt(idx) {
+  if (idx < 0 || idx >= bps.length) return;
+  bps.splice(idx, 1);
+  if (bps.length === 0) {
+    bpEditMode = false;
+    activeBpIdx = 0;
+  } else if (activeBpIdx >= bps.length) {
+    activeBpIdx = bps.length - 1;
+  }
+  persistAllState();
+  renderDashboardAll(false);
+}
+
+function setBpTouchMode(isBp) {
+  bpTouchModeIsBlueprint = isBp;
+  renderDashboardAll(false);
+}
+
+function finishBlueprintEditMode() {
+  bpEditMode = false;
+  persistAllState();
+  renderDashboardAll(false);
+  showToast('✅ 모든 도면 설정이 저장되었습니다.');
+}
+
+function toggleBpNudgeStep() {
+  bpNudgeStepMeters = (bpNudgeStepMeters === 1.0) ? 5.0 : 1.0;
+  const btn = document.getElementById('bp-step-toggle-btn');
+  if (btn) btn.textContent = `단위: ${bpNudgeStepMeters}m`;
+}
+
+function nudgeActiveBp(northFactor, eastFactor) {
+  const bp = bps[activeBpIdx];
+  if (!bp) return;
+  const northM = northFactor * bpNudgeStepMeters;
+  const eastM = eastFactor * bpNudgeStepMeters;
+  const dLat = northM / 111320.0;
+  const cosLat = Math.max(0.1, Math.abs(Math.cos(bp.lat * Math.PI / 180.0)));
+  const dLng = eastM / (111320.0 * cosLat);
+  bp.lat += dLat;
+  bp.lng += dLng;
+  persistAllState();
+  syncBlueprintsToLeaflet();
+}
+
+function resetActiveBpToMapCenter() {
+  const bp = bps[activeBpIdx];
+  if (!bp || !map) return;
+  const c = map.getCenter();
+  bp.lat = c.lat;
+  bp.lng = c.lng;
+  persistAllState();
+  syncBlueprintsToLeaflet();
+}
+
+function adjustBpRadius(deltaM) {
+  const bp = bps[activeBpIdx];
+  if (!bp) return;
+  setBpRadiusDirectly(bp, getBpCurrentRadius(bp) + deltaM);
+  renderBlueprintEditorBox();
+  persistAllState();
+  syncBlueprintsToLeaflet();
+}
+
+function onBpSizeSliderInput(val) {
+  const bp = bps[activeBpIdx];
+  if (!bp) return;
+  bp.sizeSlider = parseFloat(val);
+  document.getElementById('bp-size-label').textContent = `크기:${getBpCurrentRadius(bp).toFixed(1)}m`;
+  persistAllState();
+  syncBlueprintsToLeaflet();
+}
+
+function adjustBpRotation(deltaDeg) {
+  const bp = bps[activeBpIdx];
+  if (!bp) return;
+  bp.rotation = Math.max(-180, Math.min(180, bp.rotation + deltaDeg));
+  renderBlueprintEditorBox();
+  persistAllState();
+  syncBlueprintsToLeaflet();
+}
+
+function onBpRotSliderInput(val) {
+  const bp = bps[activeBpIdx];
+  if (!bp) return;
+  bp.rotation = parseFloat(val);
+  document.getElementById('bp-rot-label').textContent = `회전:${bp.rotation.toFixed(1)}°`;
+  persistAllState();
+  syncBlueprintsToLeaflet();
+}
+
+function onBpOpaSliderInput(val) {
+  const bp = bps[activeBpIdx];
+  if (!bp) return;
+  bp.opacity = parseFloat(val);
+  document.getElementById('bp-opa-label').textContent = `투명도:${Math.round(bp.opacity * 100)}%`;
+  persistAllState();
+  syncBlueprintsToLeaflet();
+}
+
+/* ---------- Map Blueprint Direct Drag / Pinch Gesture Layer ---------- */
+(function initBpGestureLayer() {
+  const layer = document.getElementById('bp-gesture-layer');
+  if (!layer) return;
+  let dragging = false, prevX = 0, prevY = 0;
+  let pinchDist = 0, pinchAngle = 0;
+
+  function moveBpByPixels(dx, dy) {
+    const bp = bps[activeBpIdx];
+    if (!bp || !map) return;
+    const bounds = map.getBounds();
+    const size = map.getSize();
+    if (size.x < 10 || size.y < 10) return;
+    const latPerPx = (bounds.getNorth() - bounds.getSouth()) / size.y;
+    const lngPerPx = (bounds.getEast() - bounds.getWest()) / size.x;
+    bp.lat -= dy * latPerPx;
+    bp.lng += dx * lngPerPx;
+    syncBlueprintsToLeaflet();
+  }
+
+  layer.addEventListener('mousedown', (e) => {
+    dragging = true; prevX = e.clientX; prevY = e.clientY;
+  });
+  window.addEventListener('mousemove', (e) => {
+    if (!dragging) return;
+    moveBpByPixels(e.clientX - prevX, e.clientY - prevY);
+    prevX = e.clientX; prevY = e.clientY;
+  });
+  window.addEventListener('mouseup', () => {
+    if (dragging) { dragging = false; persistAllState(); }
+  });
+
+  layer.addEventListener('touchstart', (e) => {
+    if (e.touches.length === 1) {
+      dragging = true;
+      prevX = e.touches[0].clientX;
+      prevY = e.touches[0].clientY;
+    } else if (e.touches.length >= 2) {
+      dragging = false;
+      const dx = e.touches[1].clientX - e.touches[0].clientX;
+      const dy = e.touches[1].clientY - e.touches[0].clientY;
+      pinchDist = Math.hypot(dx, dy);
+      pinchAngle = Math.atan2(dy, dx) * 180 / Math.PI;
+    }
+  }, { passive: true });
+
+  layer.addEventListener('touchmove', (e) => {
+    e.preventDefault();
+    const bp = bps[activeBpIdx];
+    if (!bp) return;
+    if (e.touches.length === 1 && dragging) {
+      moveBpByPixels(e.touches[0].clientX - prevX, e.touches[0].clientY - prevY);
+      prevX = e.touches[0].clientX;
+      prevY = e.touches[0].clientY;
+    } else if (e.touches.length >= 2 && pinchDist > 8) {
+      const dx = e.touches[1].clientX - e.touches[0].clientX;
+      const dy = e.touches[1].clientY - e.touches[0].clientY;
+      const newDist = Math.hypot(dx, dy);
+      const newAngle = Math.atan2(dy, dx) * 180 / Math.PI;
+      if (newDist > 8) {
+        setBpRadiusDirectly(bp, getBpCurrentRadius(bp) * (newDist / pinchDist));
+        pinchDist = newDist;
+      }
+      let dAng = newAngle - pinchAngle;
+      if (dAng > 180) dAng -= 360;
+      if (dAng < -180) dAng += 360;
+      bp.rotation = ((bp.rotation + dAng + 180) % 360 + 360) % 360 - 180;
+      pinchAngle = newAngle;
+      renderBlueprintEditorBox();
+      syncBlueprintsToLeaflet();
+    }
+  }, { passive: false });
+
+  layer.addEventListener('touchend', () => {
+    dragging = false;
+    pinchDist = 0;
+    persistAllState();
+  });
+})();
+
+/* =========================================================================
+   MODALS: CATEGORIES, AFTER-PHOTO, BLUEPRINTS, EXPORT & IMPORT
+   ========================================================================= */
+function showModal(html) {
+  const c = document.getElementById('modal-container');
+  const card = document.getElementById('modal-card-content');
+  if (!c || !card) return;
+  card.innerHTML = html;
+  c.classList.remove('hidden');
+}
+
+function closeModal() {
+  const c = document.getElementById('modal-container');
+  if (c) c.classList.add('hidden');
+}
+
+function onModalBackdropClick(e) {
+  if (e.target.id === 'modal-container') closeModal();
+}
+
+/* ---------- Category Selector & Filter Modals ---------- */
+function openCategorySelectorModal(forCameraDefault = false) {
+  const cats = getAllCategories();
+  const vis = getVisiblePhotos();
+  const activePhoto = (!forCameraDefault && vis.length > 0) ? vis[selectedIdx] : null;
+  const curCat = forCameraDefault ? currentDefaultCategory : (activePhoto?.category || '미분류');
+
+  const rows = cats.map(c => {
+    const cnt = photos.filter(p => p.category === c).length;
+    const isSel = (c === curCat);
+    return `
+      <div style="display:flex; align-items:center; justify-content:space-between; padding:8px 10px; background:${isSel ? 'rgba(255,193,7,0.18)' : 'rgba(255,255,255,0.05)'}; border:1px solid ${isSel ? '#ffc107' : 'rgba(255,255,255,0.12)'}; border-radius:8px; margin-bottom:6px;">
+        <div style="flex:1; cursor:pointer; font-size:13px; font-weight:${isSel ? '800' : '500'}; color:${isSel ? '#ffc107' : '#fff'};" onclick="applySelectedCategory('${c.replace(/'/g, "\\'")}', ${forCameraDefault})">
+          📁 ${c} (${cnt}장)
+        </div>
+        <button type="button" onclick="openCategoryDeleteConfirm('${c.replace(/'/g, "\\'")}')" style="background:transparent; border:none; color:#ff5252; cursor:pointer; font-size:14px;">🗑️</button>
+      </div>
+    `;
+  }).join('');
+
+  showModal(`
+    <div class="modal-header">
+      <span class="modal-title">${forCameraDefault ? '📁 촬영 기본 카테고리 선택' : '📁 사진 카테고리 변경'}</span>
+      <button type="button" class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <div style="max-height:240px; overflow-y:auto; margin-bottom:10px;">${rows}</div>
+    <div style="display:flex; gap:6px;">
+      <input type="text" id="new-cat-name-input" placeholder="새 카테고리 이름 (예: 철근, 108동)" style="flex:1; background:#111318; border:1px solid #ffc107; border-radius:8px; padding:8px 10px; color:#fff; font-size:12.5px;"/>
+      <button type="button" onclick="addNewCategoryFromModal(${forCameraDefault})" style="background:#ffc107; color:#000; border:none; border-radius:8px; padding:8px 14px; font-size:12.5px; font-weight:800; cursor:pointer;">+ 추가</button>
+    </div>
+  `);
+}
+
+function applySelectedCategory(cat, forCameraDefault) {
+  currentDefaultCategory = cat;
+  updateHudCategoryDisplay();
+  if (!forCameraDefault) {
+    const vis = getVisiblePhotos();
+    if (vis[selectedIdx]) vis[selectedIdx].category = cat;
+  }
+  persistAllState();
+  closeModal();
+  if (!document.getElementById('dashboard-screen').classList.contains('hidden')) {
+    renderDashboardAll(false);
+  }
+}
+
+function addNewCategoryFromModal(forCameraDefault) {
+  const inp = document.getElementById('new-cat-name-input');
+  const val = inp ? inp.value.trim() : '';
+  if (!val) return;
+  if (val !== '미분류') customCategories.add(val);
+  applySelectedCategory(val, forCameraDefault);
+}
+
+function openCategoryFilterModal() {
+  const cats = ['전체 카테고리', ...getAllCategories()];
+  const rows = cats.map(c => {
+    const cnt = (c === '전체 카테고리') ? photos.length : photos.filter(p => p.category === c).length;
+    const isSel = (c === categoryFilter);
+    return `
+      <div style="display:flex; align-items:center; justify-content:space-between; padding:8px 10px; background:${isSel ? 'rgba(255,193,7,0.18)' : 'rgba(255,255,255,0.05)'}; border:1px solid ${isSel ? '#ffc107' : 'rgba(255,255,255,0.12)'}; border-radius:8px; margin-bottom:6px;">
+        <div style="flex:1; cursor:pointer; font-size:13px; font-weight:${isSel ? '800' : '500'}; color:${isSel ? '#ffc107' : '#fff'};" onclick="selectCategoryFilter('${c.replace(/'/g, "\\'")}')">
+          ${c} (${cnt}장)
+        </div>
+        ${(cnt > 0 || (c !== '미분류' && c !== '전체 카테고리')) ? `<button type="button" onclick="openCategoryDeleteConfirm('${c.replace(/'/g, "\\'")}')" style="background:transparent; border:none; color:#ff5252; cursor:pointer; font-size:14px;">🗑️</button>` : ''}
+      </div>
+    `;
+  }).join('');
+
+  showModal(`
+    <div class="modal-header">
+      <span class="modal-title">📂 카테고리별 필터 및 일괄 관리</span>
+      <button type="button" class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <div style="max-height:280px; overflow-y:auto;">${rows}</div>
+  `);
+}
+
+function selectCategoryFilter(cat) {
+  categoryFilter = cat;
+  const vis = getVisiblePhotos();
+  selectedIdx = Math.max(0, vis.length - 1);
+  closeModal();
+  renderDashboardAll(true);
+}
+
+function openCategoryDeleteConfirm(targetCat) {
+  const cnt = (targetCat === '전체 카테고리') ? photos.length : photos.filter(p => p.category === targetCat).length;
+  showModal(`
+    <div class="modal-header">
+      <span class="modal-title">🗑️ '${targetCat}' 삭제 옵션 (${cnt}장)</span>
+      <button type="button" class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    ${cnt > 0 ? `
+      <button type="button" class="list-option-btn" style="background:rgba(244,67,54,0.2); border-color:#ff5252;" onclick="deletePhotosByCategory('${targetCat.replace(/'/g, "\\'")}', true)">
+        <span>🗑️</span>
+        <div>
+          <span class="list-option-title" style="color:#ff8a80;">${targetCat === '전체 카테고리' ? `전체 사진 ${cnt}장 일괄 삭제` : `'${targetCat}' 사진 ${cnt}장 모두 삭제`}</span>
+          <span class="list-option-sub">포함된 사진과 카테고리 이름을 함께 삭제합니다.</span>
+        </div>
+      </button>
+    ` : ''}
+    ${(targetCat !== '미분류' && targetCat !== '전체 카테고리') ? `
+      <button type="button" class="list-option-btn" onclick="removeCategoryNameOnly('${targetCat.replace(/'/g, "\\'")}')">
+        <span>🏷️</span>
+        <div>
+          <span class="list-option-title">사진은 유지하고 카테고리 이름만 삭제 (미분류 전환)</span>
+          <span class="list-option-sub">사진 ${cnt}장을 '미분류'로 이동시키고 카테고리만 지웁니다.</span>
+        </div>
+      </button>
+    ` : ''}
+  `);
+}
+
+async function deletePhotosByCategory(targetCat, alsoRemoveName) {
+  if (targetCat === '전체 카테고리') {
+    photos = [];
+  } else {
+    photos = photos.filter(p => p.category !== targetCat);
+    if (alsoRemoveName && targetCat !== '미분류') customCategories.delete(targetCat);
+  }
+  if (categoryFilter === targetCat) categoryFilter = '전체 카테고리';
+  await persistAllState();
+  closeModal();
+  renderDashboardAll(true);
+  showToast(`🗑️ '${targetCat}' 사진이 일괄 삭제되었습니다.`);
+}
+
+async function removeCategoryNameOnly(targetCat) {
+  customCategories.delete(targetCat);
+  photos.forEach(p => { if (p.category === targetCat) p.category = '미분류'; });
+  if (categoryFilter === targetCat) categoryFilter = '전체 카테고리';
+  if (currentDefaultCategory === targetCat) currentDefaultCategory = '미분류';
+  await persistAllState();
+  closeModal();
+  renderDashboardAll(false);
+  showToast(`🏷️ '${targetCat}' 이름이 삭제되고 사진은 미분류로 전환되었습니다.`);
+}
+
+/* ---------- After-Photo Modal ---------- */
+function openAfterPhotoModal() {
+  const vis = getVisiblePhotos();
+  if (vis.length === 0) return;
+  const active = vis[selectedIdx];
+  showModal(`
+    <div class="modal-header">
+      <span class="modal-title" style="color:#69f0ae;">🛠️ 조치후 사진 등록 · 관리 (3등분)</span>
+      <button type="button" class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <button type="button" class="list-option-btn" onclick="startCameraForAfterPhoto('${active.id}')">
+      <span style="font-size:20px;">📷</span>
+      <div>
+        <span class="list-option-title" style="color:#ffc107;">① 카메라로 조치후 사진 바로 촬영하기</span>
+        <span class="list-option-sub">카메라 화면으로 전환하여 촬영 후 자동으로 3등분 화면으로 돌아옵니다.</span>
+      </div>
+    </button>
+    <button type="button" class="list-option-btn" onclick="triggerAfterGalleryPick('${active.id}')">
+      <span style="font-size:20px;">🖼️</span>
+      <div>
+        <span class="list-option-title" style="color:#40c4ff;">② 갤러리/파일에서 조치후 사진 선택하기</span>
+        <span class="list-option-sub">이미 찍어둔 조치완료 사진을 앨범에서 골라 기존 사진과 지도 사이에 넣습니다.</span>
+      </div>
+    </button>
+    ${(active.afterB64 && active.afterB64.length > 10) ? `
+      <button type="button" class="list-option-btn" onclick="closeModal(); deleteAfterPhotoOnly();">
+        <span style="font-size:20px;">🗑️</span>
+        <div>
+          <span class="list-option-title" style="color:#ff5252;">③ 조치후 사진만 삭제 (기본 2등분으로 복귀)</span>
+        </div>
+      </button>
+    ` : ''}
+  `);
+}
+
+function startCameraForAfterPhoto(photoId) {
+  pendingAfterPhotoId = photoId;
+  updatePendingAfterBanner();
+  closeModal();
+  closeDashboardToCamera();
+  showToast('📸 조치후 사진을 촬영해주세요! 촬영 즉시 3등분 화면으로 돌아갑니다.');
+}
+
+function triggerAfterGalleryPick(photoId) {
+  pendingAfterPhotoId = photoId;
+  closeModal();
+  const inp = document.getElementById('after-gallery-input');
+  if (inp) {
+    inp.value = '';
+    inp.click();
+  }
+}
+
+document.getElementById('after-gallery-input').addEventListener('change', async (e) => {
+  const file = e.target.files && e.target.files[0];
+  if (!file || !pendingAfterPhotoId) return;
+  setLoading(true, '🛠️ 조치후 사진을 등록하는 중...');
+  try {
+    const uri = await normalizeImageFileToDataUri(file);
+    const target = photos.find(p => p.id === pendingAfterPhotoId);
+    pendingAfterPhotoId = null;
+    updatePendingAfterBanner();
+    if (target) {
+      target.afterB64 = uri;
+      await persistAllState();
+      renderDashboardAll(false);
+      showToast('✅ 조치후 사진이 등록되어 3등분 화면으로 전환되었습니다!');
+    }
+  } catch (err) {
+    showToast('조치후 사진 첨부 오류: ' + err.message);
+  } finally {
+    setLoading(false);
+  }
+});
+
+/* ---------- Multi-Photo Import from Gallery ---------- */
+function triggerGalleryMultiImport() {
+  const inp = document.getElementById('gallery-multi-input');
+  if (inp) {
+    inp.value = '';
+    inp.click();
+  }
+}
+
+document.getElementById('gallery-multi-input').addEventListener('change', async (e) => {
+  const files = Array.from(e.target.files || []);
+  if (files.length === 0) return;
+  setLoading(true, `⚡ 사진 ${files.length}장 초고속 불러오는 중...`);
+  try {
+    let defaultLat = currentPos.lat, defaultLng = currentPos.lng;
+    if (map) {
+      const c = map.getCenter();
+      defaultLat = c.lat;
+      defaultLng = c.lng;
+    }
+    let exifCount = 0;
+    for (let i = 0; i < files.length; i++) {
+      const f = files[i];
+      setLoading(true, `⚡ 사진 불러오는 중... (${i + 1} / ${files.length}장)`);
+      const buf = await f.arrayBuffer();
+      const meta = parseExifAndMetaFromArrayBuffer(buf);
+      const hasGps = (meta.lat != null && meta.lng != null && (Math.abs(meta.lat) > 0.0001 || Math.abs(meta.lng) > 0.0001));
+      if (hasGps) exifCount++;
+
+      let timeStr = meta.dateTime;
+      if (timeStr && timeStr.length >= 16) {
+        timeStr = timeStr.substring(0, 16).replace(':', '-').replace(':', '-');
+      } else {
+        timeStr = formatNowTimestamp(new Date(f.lastModified || Date.now()));
+      }
+
+      const dataUri = await normalizeImageFileToDataUri(f);
+      photos.push({
+        id: 'imp_' + Date.now() + '_' + i,
+        b64: dataUri,
+        afterB64: '',
+        lat: hasGps ? meta.lat : defaultLat,
+        lng: hasGps ? meta.lng : defaultLng,
+        alt: meta.alt || 0.0,
+        acc: 1.0,
+        azimuth: meta.azimuth !== undefined ? meta.azimuth : -1.0,
+        pitch: 0.0,
+        time: timeStr,
+        category: currentDefaultCategory,
+        memo: ''
+      });
+    }
+    dateFilter = '전체 보기';
+    categoryFilter = '전체 카테고리';
+    await persistAllState();
+    selectedIdx = Math.max(0, photos.length - 1);
+    renderDashboardAll(true);
+    showToast(`📍 사진 ${files.length}장 첨부 완료! (원본 GPS 위치 확인: ${exifCount}장)`);
+  } catch (err) {
+    showToast('사진 불러오기 오류: ' + err.message);
+  } finally {
+    setLoading(false);
+  }
+});
+
+/* ---------- Blueprint Modals ---------- */
+function openBlueprintMenuModal() {
+  showModal(`
+    <div class="modal-header">
+      <span class="modal-title">📐 도면 작업 선택</span>
+      <button type="button" class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <button type="button" class="list-option-btn" onclick="closeModal(); triggerBlueprintFileSelect();">
+      <span style="font-size:20px;">➕</span>
+      <div>
+        <span class="list-option-title" style="color:#ffc107;">도면 추가 (사진/이미지에서 가져오기)</span>
+        <span class="list-option-sub">새 층별·구역별 도면 이미지를 지도 위에 올립니다.</span>
+      </div>
+    </button>
+    <button type="button" class="list-option-btn" onclick="startBlueprintEditFromModal()">
+      <span style="font-size:20px;">🎛️</span>
+      <div>
+        <span class="list-option-title" style="color:#40c4ff;">도면 수정 (기존 도면 ${bps.length}개 위치·크기·회전 편집)</span>
+        <span class="list-option-sub">지도 위에서 도면 크기, 회전각도, 투명도, 위치를 정밀 조정합니다.</span>
+      </div>
+    </button>
+  `);
+}
+
+function startBlueprintEditFromModal() {
+  closeModal();
+  if (bps.length === 0) {
+    showToast('등록된 도면이 없습니다. 먼저 [도면 추가]를 눌러주세요.');
+    return;
+  }
+  bpEditMode = true;
+  bpTouchModeIsBlueprint = true;
+  bpGlobalShow = true;
+  if (bps[activeBpIdx]) bps[activeBpIdx].isVisible = true;
+  renderDashboardAll(false);
+}
+
+function triggerBlueprintFileSelect() {
+  const inp = document.getElementById('blueprint-file-input');
+  if (inp) {
+    inp.value = '';
+    inp.click();
+  }
+}
+
+document.getElementById('blueprint-file-input').addEventListener('change', async (e) => {
+  const file = e.target.files && e.target.files[0];
+  if (!file) return;
+  setLoading(true, '📐 도면 이미지를 최적화하는 중...');
+  try {
+    const imgEl = await loadFileAsImageElement(file);
+    const w = imgEl.naturalWidth || imgEl.width;
+    const h = imgEl.naturalHeight || imgEl.height;
+    const maxSide = Math.max(w, h);
+    const scale = maxSide > 1600 ? (1600 / maxSide) : 1.0;
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(w * scale);
+    canvas.height = Math.round(h * scale);
+    canvas.getContext('2d').drawImage(imgEl, 0, 0, canvas.width, canvas.height);
+    const b64 = canvas.toDataURL('image/png');
+
+    let cLat = currentPos.lat, cLng = currentPos.lng;
+    if (map) {
+      const c = map.getCenter();
+      cLat = c.lat; cLng = c.lng;
+    }
+    const newBp = {
+      id: 'bp_' + Date.now(),
+      name: `도면 ${bps.length + 1}`,
+      b64,
+      lat: cLat,
+      lng: cLng,
+      baseRadius: 200.0,
+      sizeSlider: 0.5,
+      rotation: 0.0,
+      opacity: 0.5,
+      isVisible: true
+    };
+    bps.push(newBp);
+    activeBpIdx = bps.length - 1;
+    bpGlobalShow = true;
+    bpEditMode = true;
+    bpTouchModeIsBlueprint = true;
+    await persistAllState();
+    renderDashboardAll(false);
+    showToast(`📐 [${newBp.name}]이 추가되었습니다. 위치와 크기를 맞춰주세요.`);
+  } catch (err) {
+    showToast('도면 추가 오류: ' + err.message);
+  } finally {
+    setLoading(false);
+  }
+});
+
+function promptRenameBp(idx) {
+  const bp = bps[idx];
+  if (!bp) return;
+  showModal(`
+    <div class="modal-header">
+      <span class="modal-title">✏️ 도면 이름 변경</span>
+      <button type="button" class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <input type="text" id="rename-bp-input" value="${bp.name}" style="width:100%; background:#111318; border:1px solid #ffc107; border-radius:8px; padding:9px 12px; color:#fff; font-size:13px; margin-bottom:12px;"/>
+    <div style="display:flex; justify-content:flex-end; gap:8px;">
+      <button type="button" class="fine-btn" onclick="closeModal()">취소</button>
+      <button type="button" style="background:#ffc107; color:#000; border:none; border-radius:7px; padding:7px 14px; font-weight:800; cursor:pointer;" onclick="confirmRenameBp(${idx})">확인</button>
+    </div>
+  `);
+}
+
+function confirmRenameBp(idx) {
+  const inp = document.getElementById('rename-bp-input');
+  if (inp && inp.value.trim() && bps[idx]) {
+    bps[idx].name = inp.value.trim();
+    persistAllState();
+    renderBlueprintEditorBox();
+  }
+  closeModal();
+}
+
+function openBlueprintLayerModal() {
+  const rows = bps.map((bp, i) => {
+    const shown = bpGlobalShow && bp.isVisible;
+    return `
+      <div style="display:flex; align-items:center; justify-content:space-between; padding:9px 10px; background:${shown ? 'rgba(105,240,174,0.14)' : 'rgba(255,255,255,0.06)'}; border:1px solid ${shown ? '#69f0ae' : 'rgba(255,255,255,0.16)'}; border-radius:8px; margin-bottom:6px;">
+        <div style="flex:1; cursor:pointer; font-size:13px; font-weight:${shown ? '800' : '500'}; color:${shown ? '#69f0ae' : '#fff'};" onclick="soloSelectBpLayer(${i})">
+          ${shown ? '🔘' : '⚪'} ${bp.name} (단독 켜기)
+        </div>
+        <button type="button" class="fine-btn" onclick="toggleSingleBpVisible(${i}); openBlueprintLayerModal();">${shown ? '👁️ 켜짐' : '🚫 꺼짐'}</button>
+      </div>
+    `;
+  }).join('');
+
+  showModal(`
+    <div class="modal-header">
+      <span class="modal-title">📑 층별 · 구역별 도면 선택</span>
+      <button type="button" class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <div style="max-height:240px; overflow-y:auto; margin-bottom:10px;">${rows}</div>
+    <div style="display:flex; gap:8px;">
+      <button type="button" style="flex:1; background:transparent; border:1px solid #ff5252; color:#ff5252; border-radius:8px; padding:8px; font-weight:800; cursor:pointer;" onclick="setAllBpVisibility(false)">전부 끄기</button>
+      <button type="button" style="flex:1; background:transparent; border:1px solid #40c4ff; color:#40c4ff; border-radius:8px; padding:8px; font-weight:800; cursor:pointer;" onclick="setAllBpVisibility(true)">전체 함께 켜기</button>
+    </div>
+  `);
+}
+
+function soloSelectBpLayer(idx) {
+  bpGlobalShow = true;
+  bps.forEach((b, j) => { b.isVisible = (j === idx); });
+  activeBpIdx = idx;
+  persistAllState();
+  closeModal();
+  renderDashboardAll(false);
+}
+
+function setAllBpVisibility(showAll) {
+  bpGlobalShow = showAll;
+  if (showAll) bps.forEach(b => { b.isVisible = true; });
+  else bpEditMode = false;
+  persistAllState();
+  closeModal();
+  renderDashboardAll(false);
+}
+
+/* =========================================================================
+   ALL STORAGE, EXPORT & IMPORT MODES (DEVICE SAVE, HTML, ZIP, COMBINED JPG, CLIPBOARD)
+   ========================================================================= */
+function openExportImportModal() {
+  const visCount = getVisiblePhotos().length;
+  showModal(`
+    <div class="modal-header">
+      <span class="modal-title">📤 모든 저장 · 내보내기 & 📥 불러오기</span>
+      <button type="button" class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+
+    <button type="button" class="list-option-btn" onclick="closeModal(); saveCurrentPhotoToDevice(false);">
+      <span style="font-size:20px;">📱</span>
+      <div>
+        <span class="list-option-title" style="color:#fff;">① 현재 사진 기기/아이폰 사진첩 저장 · 공유</span>
+        <span class="list-option-sub">아이폰(공유 시트 → 이미지 저장) 및 PC 다운로드 폴더에 원본 스탬프 사진을 즉시 저장합니다.</span>
+      </div>
+    </button>
+
+    <button type="button" class="list-option-btn" onclick="closeModal(); exportCombinedReportJpg();">
+      <span style="font-size:20px;">🖼️</span>
+      <div>
+        <span class="list-option-title" style="color:#69f0ae;">② [사진 + 도면 지도] 합본 이미지(.jpg) 저장·공유</span>
+        <span class="list-option-sub">조치후 사진이 있으면 [조치전 + 조치후 + 도면 지도] 3등분 고해상도 합본 JPG로 생성합니다.</span>
+      </div>
+    </button>
+
+    <button type="button" class="list-option-btn" onclick="closeModal(); exportCompatibleHtmlViewer();">
+      <span style="font-size:20px;">⚡</span>
+      <div>
+        <span class="list-option-title" style="color:#40c4ff;">③ 웹 뷰어 파일(.html) 내보내기 (안드로이드 앱 100% 호환)</span>
+        <span class="list-option-sub">현재 필터된 사진(${visCount}장) + 조치전·조치후 + 도면 데이터를 단일 HTML로 저장합니다.</span>
+      </div>
+    </button>
+
+    <button type="button" class="list-option-btn" onclick="closeModal(); exportCompatibleZipPackage();">
+      <span style="font-size:20px;">📦</span>
+      <div>
+        <span class="list-option-title" style="color:#ffd54f;">④ 프로젝트 압축파일(.zip) 내보내기 (안드로이드 앱 호환)</span>
+        <span class="list-option-sub">photos_meta.json, blueprint_config.json 및 모든 원본 사진·도면을 묶어 ZIP으로 저장합니다.</span>
+      </div>
+    </button>
+
+    <button type="button" class="list-option-btn" onclick="closeModal(); copyAppPayloadToClipboard();">
+      <span style="font-size:20px;">📋</span>
+      <div>
+        <span class="list-option-title" style="color:#00e676;">⑤ 안드로이드 앱 업로드용 클립보드 데이터 복사</span>
+        <span class="list-option-sub">GPS_CAMERA_HTML_V2 포맷으로 복사하여 앱에서 즉시 붙여넣기할 수 있습니다.</span>
+      </div>
+    </button>
+
+    <div style="border-top:1px solid rgba(255,255,255,0.15); margin:10px 0;"></div>
+
+    <button type="button" class="list-option-btn" style="background:rgba(0,230,118,0.12); border-color:#00e676;" onclick="closeModal(); triggerProjectFileImport();">
+      <span style="font-size:20px;">📥</span>
+      <div>
+        <span class="list-option-title" style="color:#00e676;">⑥ 받은 HTML(웹 뷰어) · ZIP 파일 업로드해서 복원</span>
+        <span class="list-option-sub">안드로이드 앱이나 다른 기기에서 공유받은 .html 또는 .zip 파일을 그대로 복원합니다.</span>
+      </div>
+    </button>
+  `);
+}
+
+function dataUriToBlob(dataUri) {
+  const parts = dataUri.split(',');
+  const mimeMatch = parts[0].match(/:(.*?);/);
+  const mime = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+  const bstr = atob(parts[1]);
+  let n = bstr.length;
+  const u8 = new Uint8Array(n);
+  while (n--) u8[n] = bstr.charCodeAt(n);
+  return new Blob([u8], { type: mime });
+}
+
+async function shareOrDownloadBlob(blob, fileName, titleText) {
+  const file = new File([blob], fileName, { type: blob.type });
+  // On iOS Safari / Mobile browsers, Web Share API allows saving directly to Photos or KakaoTalk
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try {
+      await navigator.share({
+        files: [file],
+        title: titleText || fileName,
+        text: titleText || ''
+      });
+      return;
+    } catch (err) {
+      if (err && err.name === 'AbortError') return;
+    }
+  }
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+
+/* 1. Save individual photo to device / iOS Photo Library */
+async function saveCurrentPhotoToDevice(isAfter = false) {
+  const vis = getVisiblePhotos();
+  if (vis.length === 0) {
+    showToast('저장할 사진이 없습니다.');
+    return;
+  }
+  const p = vis[selectedIdx];
+  const targetUri = isAfter ? p.afterB64 : p.b64;
+  if (!targetUri) return;
+  const stamp = (p.time || '').replace(/[^0-9]/g, '') || Date.now();
+  const fn = `GPS_${isAfter ? 'AFTER_' : ''}${stamp}.jpg`;
+  const blob = dataUriToBlob(targetUri);
+  await shareOrDownloadBlob(blob, fn, `[${p.category}] 현장 사진 (${p.time})`);
+  showToast('💾 사진 저장/공유 창이 실행되었습니다.');
+}
+
+/* 2. Export [Photo + Blueprint Map] Combined Report JPG (2-split or 3-split) */
+async function exportCombinedReportJpg() {
+  const vis = getVisiblePhotos();
+  if (vis.length === 0) {
+    showToast('합성할 사진이 없습니다.');
+    return;
+  }
+  setLoading(true, '🖼️ [사진 + 도면 지도] 고해상도 합본 이미지를 생성하는 중...');
+  try {
+    const p = vis[selectedIdx];
+    const targetH = 1000;
+    const leftImg = await loadDataUriImage(p.b64);
+    const leftW = Math.round((leftImg.width / leftImg.height) * targetH);
+
+    let midImg = null, midW = 0;
+    if (p.afterB64 && p.afterB64.length > 10) {
+      midImg = await loadDataUriImage(p.afterB64);
+      midW = Math.round((midImg.width / midImg.height) * targetH);
+    }
+
+    const mapCanvas = await renderMapSnapshotCanvas(targetH, targetH);
+    const gap = 12;
+    const totalW = leftW + (midImg ? midW + gap : 0) + targetH + gap;
+
+    const outCanvas = document.createElement('canvas');
+    outCanvas.width = totalW;
+    outCanvas.height = targetH;
+    const ctx = outCanvas.getContext('2d');
+    ctx.fillStyle = '#141414';
+    ctx.fillRect(0, 0, totalW, targetH);
+
+    let curX = 0;
+    ctx.drawImage(leftImg, curX, 0, leftW, targetH);
+    curX += leftW + gap;
+    if (midImg) {
+      ctx.drawImage(midImg, curX, 0, midW, targetH);
+      curX += midW + gap;
+    }
+    ctx.drawImage(mapCanvas, curX, 0, targetH, targetH);
+
+    const jpgUri = outCanvas.toDataURL('image/jpeg', 0.92);
+    const blob = dataUriToBlob(jpgUri);
+    const stamp = Date.now();
+    await shareOrDownloadBlob(
+      blob,
+      `GPS_Report_${stamp}.jpg`,
+      `🖼️ 현장 사진${midImg ? '(조치전·조치후)' : ''} & 도면 위치 합본 [${p.category}] (${p.time})`
+    );
+    showToast('✅ 합본 이미지(.jpg)가 생성되었습니다!');
+  } catch (err) {
+    showToast('합본 이미지 생성 오류: ' + err.message);
+  } finally {
+    setLoading(false);
+  }
+}
+
+function loadDataUriImage(uri) {
+  return new Promise((resolve, reject) => {
+    const im = new Image();
+    im.onload = () => resolve(im);
+    im.onerror = reject;
+    im.src = uri;
+  });
+}
+
+async function renderMapSnapshotCanvas(w, h) {
+  const c = document.createElement('canvas');
+  c.width = w;
+  c.height = h;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#e8ecf2';
+  ctx.fillRect(0, 0, w, h);
+
+  if (!map) return c;
+  const center = map.getCenter();
+  const zoom = Math.round(map.getZoom());
+
+  // Project lat/lng to global Web Mercator pixel at `zoom`
+  const tileSize = 256;
+  const scale = tileSize * Math.pow(2, zoom);
+  function project(lat, lng) {
+    const siny = Math.min(Math.max(Math.sin(lat * Math.PI / 180), -0.9999), 0.9999);
+    return {
+      x: (0.5 + lng / 360) * scale,
+      y: (0.5 - Math.log((1 + siny) / (1 - siny)) / (4 * Math.PI)) * scale
+    };
+  }
+  const centerPt = project(center.lat, center.lng);
+  const topLeftX = centerPt.x - w / 2;
+  const topLeftY = centerPt.y - h / 2;
+
+  // Draw map tiles
+  const minTileX = Math.floor(topLeftX / tileSize);
+  const maxTileX = Math.floor((topLeftX + w) / tileSize);
+  const minTileY = Math.floor(topLeftY / tileSize);
+  const maxTileY = Math.floor((topLeftY + h) / tileSize);
+
+  const tilePromises = [];
+  for (let tx = minTileX; tx <= maxTileX; tx++) {
+    for (let ty = minTileY; ty <= maxTileY; ty++) {
+      tilePromises.push((async () => {
+        try {
+          const im = new Image();
+          im.crossOrigin = 'anonymous';
+          await new Promise((res, rej) => {
+            im.onload = res;
+            im.onerror = rej;
+            im.src = `https://a.basemaps.cartocdn.com/rastertiles/voyager/${zoom}/${tx}/${ty}.png`;
+          });
+          ctx.drawImage(im, tx * tileSize - topLeftX, ty * tileSize - topLeftY, tileSize, tileSize);
+        } catch (_) {}
+      })());
+    }
+  }
+  await Promise.all(tilePromises);
+
+  // Draw visible blueprints
+  if (bpGlobalShow) {
+    for (const bp of bps) {
+      if (!bp.isVisible) continue;
+      try {
+        const url = await bakeBlueprintRotatedUrl(bp);
+        const im = await loadDataUriImage(url);
+        const b = getBpBounds(bp);
+        const nw = project(b.neLat, b.swLng);
+        const se = project(b.swLat, b.neLng);
+        ctx.drawImage(im, nw.x - topLeftX, nw.y - topLeftY, se.x - nw.x, se.y - nw.y);
+      } catch (_) {}
+    }
+  }
+
+  // Draw photo markers
+  const vis = getVisiblePhotos();
+  vis.forEach((p, idx) => {
+    const pt = project(p.lat, p.lng);
+    const mx = pt.x - topLeftX;
+    const my = pt.y - topLeftY;
+    const isSel = (idx === selectedIdx);
+    const col = isSel ? '#2979ff' : '#f44336';
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(mx, my, 16, 0, Math.PI * 2);
+    ctx.fillStyle = isSel ? 'rgba(41,121,255,0.35)' : 'rgba(244,67,54,0.35)';
+    ctx.fill();
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = col;
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(mx, my, 6, 0, Math.PI * 2);
+    ctx.fillStyle = col;
+    ctx.fill();
+    ctx.restore();
+  });
+
+  return c;
+}
+
+/* 3. Export 100% Android-App-Compatible HTML Viewer */
+async function exportCompatibleHtmlViewer() {
+  const vis = getVisiblePhotos();
+  if (vis.length === 0 && bps.length === 0) {
+    showToast('내보낼 사진이나 도면이 없습니다.');
+    return;
+  }
+  setLoading(true, '⚡ 안드로이드 앱 및 PC·아이폰 호환 HTML 뷰어 생성 중...');
+  try {
+    const exportPhotos = vis.map(p => ({
+      b64: p.b64,
+      afterB64: p.afterB64 || '',
+      lat: p.lat,
+      lng: p.lng,
+      alt: p.alt || 0,
+      acc: p.acc || 1,
+      azimuth: p.azimuth ?? -1,
+      pitch: p.pitch || 0,
+      time: p.time,
+      category: p.category || '미분류',
+      memo: p.memo || ''
+    }));
+
+    const exportBps = bps.map(bp => {
+      const b = getBpBounds(bp);
+      return {
+        id: bp.id,
+        name: bp.name,
+        b64: bp.b64,
+        lat: bp.lat,
+        lng: bp.lng,
+        swLat: b.swLat,
+        swLng: b.swLng,
+        neLat: b.neLat,
+        neLng: b.neLng,
+        rotation: bp.rotation,
+        opacity: 1.0,
+        origOpacity: bp.opacity,
+        baseRadius: bp.baseRadius,
+        sizeSlider: bp.sizeSlider,
+        isVisible: bpGlobalShow && bp.isVisible
+      };
+    });
+
+    // Embed the current full app HTML with preloaded photos & bps so the exported HTML also has camera + viewer + app upload button!
+    let fullHtml = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
+    const injectScript = `\n<script id="preloaded-export-data">\nconst photos = ${JSON.stringify(exportPhotos)};\nconst bps = ${JSON.stringify(exportBps)};\nwindow.__PRELOADED_EXPORT__ = { photos, bps };\n<\/script>\n`;
+    fullHtml = fullHtml.replace('</body>', injectScript + '</body>');
+
+    const blob = new Blob([fullHtml], { type: 'text/html;charset=utf-8' });
+    const stamp = formatNowTimestamp().replace(/[^0-9]/g, '');
+    await shareOrDownloadBlob(blob, `GPS_Map_Viewer_${stamp}.html`, '📍 GPS 도면 & 현장 촬영 사진 웹 뷰어(.html)');
+    showToast('✅ HTML 뷰어 파일이 생성되었습니다! (안드로이드 앱·아이폰·PC 모두 호환)');
+  } catch (err) {
+    showToast('HTML 내보내기 오류: ' + err.message);
+  } finally {
+    setLoading(false);
+  }
+}
+
+/* 4. Export 100% Android-App-Compatible ZIP Archive */
+async function exportCompatibleZipPackage() {
+  const vis = getVisiblePhotos();
+  if (vis.length === 0 && bps.length === 0) {
+    showToast('내보낼 사진이나 도면이 없습니다.');
+    return;
+  }
+  if (typeof JSZip === 'undefined') {
+    showToast('ZIP 라이브러리를 불러오지 못했습니다. HTML 내보내기를 이용해 주세요.');
+    return;
+  }
+  setLoading(true, '📦 안드로이드 앱 호환 ZIP 압축 패키지 생성 중...');
+  try {
+    const zip = new JSZip();
+    const exportedMeta = [];
+
+    for (let i = 0; i < vis.length; i++) {
+      const p = vis[i];
+      const fileName = `photo_${i}_${Date.now()}.jpg`;
+      const base64Data = p.b64.split(',')[1];
+      zip.file(`photos/${fileName}`, base64Data, { base64: true });
+
+      const itemMeta = {
+        path: fileName,
+        fileName: fileName,
+        latitude: p.lat,
+        longitude: p.lng,
+        altitude: p.alt || 0,
+        accuracy: p.acc || 1,
+        azimuth: p.azimuth ?? -1,
+        pitch: p.pitch || 0,
+        time: p.time,
+        category: p.category || '미분류',
+        memo: p.memo || ''
+      };
+
+      if (p.afterB64 && p.afterB64.length > 10) {
+        const afterFileName = `after_${i}_${Date.now()}.jpg`;
+        const afterB64Data = p.afterB64.split(',')[1];
+        zip.file(`photos/${afterFileName}`, afterB64Data, { base64: true });
+        itemMeta.afterFileName = afterFileName;
+      }
+      exportedMeta.push(itemMeta);
+    }
+    zip.file('photos_meta.json', JSON.stringify(exportedMeta, null, 2));
+
+    const exportedBps = [];
+    for (let i = 0; i < bps.length; i++) {
+      const bp = bps[i];
+      const ext = bp.b64.includes('image/png') ? 'png' : 'jpg';
+      const bpName = `bp_saved_${i}.${ext}`;
+      zip.file(`blueprint/${bpName}`, bp.b64.split(',')[1], { base64: true });
+      exportedBps.push({
+        id: bp.id,
+        name: bp.name,
+        imagePath: bpName,
+        fileName: bpName,
+        centerLat: bp.lat,
+        centerLng: bp.lng,
+        baseRadius: bp.baseRadius,
+        sizeSlider: bp.sizeSlider,
+        rotation: bp.rotation,
+        opacity: bp.opacity,
+        isVisible: bp.isVisible
+      });
+    }
+    if (exportedBps.length > 0) {
+      zip.file('blueprint_config.json', JSON.stringify({
+        globalShow: bpGlobalShow,
+        blueprints: exportedBps
+      }, null, 2));
+    }
+
+    const zipBlob = await zip.generateAsync({ type: 'blob' });
+    const stamp = formatNowTimestamp().replace(/[^0-9]/g, '');
+    await shareOrDownloadBlob(zipBlob, `GPS_Camera_Package_${stamp}.zip`, '📦 GPS 도면 & 현장 사진 원본 패키지(.zip)');
+    showToast('✅ ZIP 패키지 생성이 완료되었습니다!');
+  } catch (err) {
+    showToast('ZIP 생성 오류: ' + err.message);
+  } finally {
+    setLoading(false);
+  }
+}
+
+/* 5. Copy Android App Upload Payload to Clipboard */
+function copyAppPayloadToClipboard() {
+  const vis = getVisiblePhotos();
+  const exportPhotos = vis.map(p => ({
+    b64: p.b64,
+    afterB64: p.afterB64 || '',
+    lat: p.lat, lng: p.lng, alt: p.alt || 0, acc: p.acc || 1,
+    azimuth: p.azimuth ?? -1, pitch: p.pitch || 0,
+    time: p.time, category: p.category || '미분류', memo: p.memo || ''
+  }));
+  const exportBps = bps.map(bp => {
+    const b = getBpBounds(bp);
+    return {
+      id: bp.id, name: bp.name, b64: bp.b64,
+      lat: bp.lat, lng: bp.lng,
+      swLat: b.swLat, swLng: b.swLng, neLat: b.neLat, neLng: b.neLng,
+      rotation: bp.rotation, opacity: 1.0, origOpacity: bp.opacity,
+      baseRadius: bp.baseRadius, sizeSlider: bp.sizeSlider,
+      isVisible: bpGlobalShow && bp.isVisible
+    };
+  });
+  const rawStr = 'GPS_CAMERA_HTML_V2:' + JSON.stringify({ photos: exportPhotos, bps: exportBps });
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = rawStr;
+    ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed';
+    ta.style.left = '-9999px';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+  } catch (_) {}
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(rawStr).catch(() => {});
+  }
+  showToast(`✅ 사진(${exportPhotos.length}장)·도면(${exportBps.length}개) 데이터가 클립보드에 복사되었습니다!`);
+}
+
+/* 6. Import HTML or ZIP Project File */
+function triggerProjectFileImport() {
+  const inp = document.getElementById('project-import-input');
+  if (inp) {
+    inp.value = '';
+    inp.click();
+  }
+}
+
+document.getElementById('project-import-input').addEventListener('change', async (e) => {
+  const file = e.target.files && e.target.files[0];
+  if (!file) return;
+  const low = file.name.toLowerCase();
+  if (low.endsWith('.zip')) {
+    await importFromZipFile(file);
+  } else {
+    const text = await file.text();
+    await importFromHtmlText(text);
+  }
+});
+
+function extractJsArrayAfterMarker(srcText, marker) {
+  const mPos = srcText.lastIndexOf(marker);
+  if (mPos < 0) return null;
+  const arrStart = srcText.indexOf('[', mPos + marker.length);
+  if (arrStart < 0) return null;
+  let depth = 0, inStr = false, escaped = false;
+  for (let i = arrStart; i < srcText.length; i++) {
+    const cu = srcText.charCodeAt(i);
+    if (escaped) { escaped = false; continue; }
+    if (cu === 92) { if (inStr) escaped = true; continue; }
+    if (cu === 34) { inStr = !inStr; continue; }
+    if (!inStr) {
+      if (cu === 91) depth++;
+      else if (cu === 93) {
+        depth--;
+        if (depth === 0) return srcText.substring(arrStart, i + 1);
+      }
+    }
+  }
+  return null;
+}
+
+async function importFromHtmlText(inputText) {
+  setLoading(true, '📥 HTML 프로젝트 데이터를 복원하는 중...');
+  try {
+    let pList = [], bList = [];
+    if (inputText.startsWith('GPS_CAMERA_HTML_V2:')) {
+      const parsed = JSON.parse(inputText.substring('GPS_CAMERA_HTML_V2:'.length));
+      pList = parsed.photos || [];
+      bList = parsed.bps || [];
+    } else {
+      const pJson = extractJsArrayAfterMarker(inputText, 'const photos =');
+      const bJson = extractJsArrayAfterMarker(inputText, 'const bps =');
+      if (pJson) pList = JSON.parse(pJson);
+      if (bJson) bList = JSON.parse(bJson);
+    }
+
+    if (pList.length === 0 && bList.length === 0) {
+      throw new Error('유효한 GPS현장캠 HTML 데이터가 아닙니다.');
+    }
+
+    let pAdded = 0, bAdded = 0;
+    pList.forEach((m, i) => {
+      if (!m.b64) return;
+      const cat = (m.category && String(m.category).trim()) ? String(m.category).trim() : '미분류';
+      if (cat !== '미분류') customCategories.add(cat);
+      photos.push({
+        id: 'html_imp_' + Date.now() + '_' + i,
+        b64: m.b64,
+        afterB64: m.afterB64 || '',
+        lat: Number(m.lat ?? 37.4984),
+        lng: Number(m.lng ?? 127.1324),
+        alt: Number(m.alt ?? 0),
+        acc: Number(m.acc ?? 1),
+        azimuth: Number(m.azimuth ?? -1),
+        pitch: Number(m.pitch ?? 0),
+        time: m.time || formatNowTimestamp(),
+        category: cat,
+        memo: m.memo || ''
+      });
+      pAdded++;
+    });
+
+    bList.forEach((bm, i) => {
+      if (!bm.b64) return;
+      let baseRad = Number(bm.baseRadius || 0);
+      let sizeSl = Number(bm.sizeSlider ?? 0.5);
+      if (baseRad <= 0.1 && bm.swLat != null && bm.neLat != null) {
+        baseRad = Math.min(5000, Math.max(5, (Math.abs(bm.neLat - bm.swLat) / 2.0) * 111320.0));
+        sizeSl = 0.5;
+      } else if (baseRad <= 0.1) {
+        baseRad = 200.0;
+      }
+      bps.push({
+        id: 'bp_imp_' + Date.now() + '_' + i,
+        name: bm.name || `복원 도면 ${bps.length + 1}`,
+        b64: bm.b64,
+        lat: Number(bm.lat ?? 37.4984),
+        lng: Number(bm.lng ?? 127.1324),
+        baseRadius: baseRad,
+        sizeSlider: sizeSl,
+        rotation: Number(bm.rotation ?? 0),
+        opacity: Number(bm.origOpacity ?? bm.opacity ?? 0.5),
+        isVisible: bm.isVisible !== false
+      });
+      bAdded++;
+    });
+
+    if (bAdded > 0) {
+      bpGlobalShow = true;
+      activeBpIdx = bps.length - 1;
+    }
+    dateFilter = '전체 보기';
+    categoryFilter = '전체 카테고리';
+    await persistAllState();
+    selectedIdx = Math.max(0, photos.length - 1);
+    openDashboardScreen();
+    showToast(`🎉 업로드 완료! 사진 ${pAdded}장 + 도면 ${bAdded}개가 복원되었습니다.`);
+  } catch (err) {
+    showToast('HTML 복원 오류: ' + err.message);
+  } finally {
+    setLoading(false);
+  }
+}
+
+async function importFromZipFile(zipFile) {
+  if (typeof JSZip === 'undefined') {
+    showToast('ZIP 라이브러리가 로드되지 않았습니다.');
+    return;
+  }
+  setLoading(true, '📦 ZIP 압축 파일에서 사진과 도면을 복원하는 중...');
+  try {
+    const zip = await JSZip.loadAsync(zipFile);
+    let pAdded = 0, bAdded = 0;
+
+    const metaEntry = zip.file('photos_meta.json');
+    if (metaEntry) {
+      const metaList = JSON.parse(await metaEntry.async('string'));
+      for (let i = 0; i < metaList.length; i++) {
+        const m = metaList[i];
+        const fn = m.fileName || (m.path ? m.path.split('/').pop() : '');
+        const pEntry = zip.file(`photos/${fn}`);
+        if (!pEntry) continue;
+        const b64 = 'data:image/jpeg;base64,' + (await pEntry.async('base64'));
+        let afterB64 = '';
+        if (m.afterFileName && zip.file(`photos/${m.afterFileName}`)) {
+          afterB64 = 'data:image/jpeg;base64,' + (await zip.file(`photos/${m.afterFileName}`).async('base64'));
+        }
+        const cat = m.category || '미분류';
+        if (cat !== '미분류') customCategories.add(cat);
+        photos.push({
+          id: 'zip_imp_' + Date.now() + '_' + i,
+          b64,
+          afterB64,
+          lat: Number(m.latitude ?? 37.4984),
+          lng: Number(m.longitude ?? 127.1324),
+          alt: Number(m.altitude ?? 0),
+          acc: Number(m.accuracy ?? 1),
+          azimuth: Number(m.azimuth ?? -1),
+          pitch: Number(m.pitch ?? 0),
+          time: m.time || formatNowTimestamp(),
+          category: cat,
+          memo: m.memo || ''
+        });
+        pAdded++;
+      }
+    }
+
+    const bpEntry = zip.file('blueprint_config.json');
+    if (bpEntry) {
+      const bpCfg = JSON.parse(await bpEntry.async('string'));
+      const bpList = bpCfg.blueprints || [];
+      for (let i = 0; i < bpList.length; i++) {
+        const bm = bpList[i];
+        const fn = bm.fileName || (bm.imagePath ? bm.imagePath.split('/').pop() : '');
+        const fEntry = zip.file(`blueprint/${fn}`);
+        if (!fEntry) continue;
+        const mime = fn.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg';
+        const b64 = `data:${mime};base64,` + (await fEntry.async('base64'));
+        bps.push({
+          id: 'bp_zip_' + Date.now() + '_' + i,
+          name: bm.name || `도면 ${bps.length + 1}`,
+          b64,
+          lat: Number(bm.centerLat ?? 37.4984),
+          lng: Number(bm.centerLng ?? 127.1324),
+          baseRadius: Number(bm.baseRadius ?? 200),
+          sizeSlider: Number(bm.sizeSlider ?? 0.5),
+          rotation: Number(bm.rotation ?? 0),
+          opacity: Number(bm.opacity ?? 0.5),
+          isVisible: bm.isVisible !== false
+        });
+        bAdded++;
+      }
+    }
+
+    if (bAdded > 0) {
+      bpGlobalShow = true;
+      activeBpIdx = bps.length - 1;
+    }
+    dateFilter = '전체 보기';
+    categoryFilter = '전체 카테고리';
+    await persistAllState();
+    selectedIdx = Math.max(0, photos.length - 1);
+    openDashboardScreen();
+    showToast(`🎉 ZIP 업로드 완료! 사진 ${pAdded}장 + 도면 ${bAdded}개가 복원되었습니다.`);
+  } catch (err) {
+    showToast('ZIP 복원 오류: ' + err.message);
+  } finally {
+    setLoading(false);
+  }
+}
+
+/* =========================================================================
+   INITIALIZATION ON PAGE LOAD
+   ========================================================================= */
+window.addEventListener('resize', () => {
+  applyVideoFrameAspect();
+  if (map) map.invalidateSize();
+});
+
+window.addEventListener('DOMContentLoaded', async () => {
+  await restoreAllState();
+
+  // Check if this HTML file was exported with preloaded photos/bps
+  if (window.__PRELOADED_EXPORT__) {
+    const preP = window.__PRELOADED_EXPORT__.photos || [];
+    const preB = window.__PRELOADED_EXPORT__.bps || [];
+    if (preP.length > 0 || preB.length > 0) {
+      photos = preP.map((m, i) => ({
+        id: 'pre_' + i,
+        b64: m.b64,
+        afterB64: m.afterB64 || '',
+        lat: Number(m.lat ?? 37.4984),
+        lng: Number(m.lng ?? 127.1324),
+        alt: Number(m.alt ?? 0),
+        acc: Number(m.acc ?? 1),
+        azimuth: Number(m.azimuth ?? -1),
+        pitch: Number(m.pitch ?? 0),
+        time: m.time || formatNowTimestamp(),
+        category: m.category || '미분류',
+        memo: m.memo || ''
+      }));
+      bps = preB.map((bm, i) => ({
+        id: bm.id || ('pre_bp_' + i),
+        name: bm.name || `도면 ${i + 1}`,
+        b64: bm.b64,
+        lat: Number(bm.lat ?? 37.4984),
+        lng: Number(bm.lng ?? 127.1324),
+        baseRadius: Number(bm.baseRadius ?? 200),
+        sizeSlider: Number(bm.sizeSlider ?? 0.5),
+        rotation: Number(bm.rotation ?? 0),
+        opacity: Number(bm.origOpacity ?? 0.5),
+        isVisible: bm.isVisible !== false
+      }));
+      await persistAllState();
+      openDashboardScreen();
+      return;
+    }
+  }
+
+  updateCameraHudText();
+  setInterval(updateCameraHudText, 1000);
+  startGpsWatch();
+  startLiveCamera();
+
+  // Attach non-iOS orientation listeners automatically
+  if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission !== 'function') {
+    window.addEventListener('deviceorientationabsolute', handleDeviceOrientation, true);
+    window.addEventListener('deviceorientation', handleDeviceOrientation, true);
+  }
+});
+</script>
+</body>
+</html>
