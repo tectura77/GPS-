@@ -382,6 +382,7 @@
       <button type="button" class="ratio-btn" id="ratio-btn-1-1" onclick="setAspectRatioMode('1:1')">1:1</button>
     </div>
     <div class="cam-util-group">
+      <button type="button" class="cam-icon-btn" id="gps-refresh-btn" onclick="forceRefreshGpsPosition(true)" title="현재 GPS 위치 즉시 갱신">📍 GPS갱신</button>
       <button type="button" class="cam-icon-btn" id="sensor-perm-btn" onclick="requestIosSensorsAndGps()" title="아이폰 나침반·GPS 센서 활성화">🧭 센서ON</button>
       <button type="button" class="cam-icon-btn" id="switch-cam-btn" onclick="switchCameraFacing()" title="전면/후면 카메라 전환">🔄 카메라전환</button>
     </div>
@@ -596,11 +597,12 @@ let ratioMode = '16:9';
 let currentZoom = 1.0;
 let pendingAfterPhotoId = null;
 
-let currentPos = { lat: 37.4984, lng: 127.1324, alt: 25.0, acc: 8.0, hasFix: false };
+let currentPos = { lat: null, lng: null, alt: 0.0, acc: 999.0, hasFix: false, fixTimeMs: 0 };
 let currentHeading = 0.0;
 let currentPitch = 0.0;
 let sensorsActive = false;
 let geoWatchId = null;
+let gpsPollIntervalId = null;
 
 // Map & Blueprint Edit State
 let map = null;
@@ -724,6 +726,14 @@ async function restoreAllState() {
   }
   const savedBpShow = await dbGet('bpGlobalShow');
   if (typeof savedBpShow === 'boolean') bpGlobalShow = savedBpShow;
+  const savedLastGps = await dbGet('lastKnownGps');
+  if (savedLastGps && typeof savedLastGps.lat === 'number' && typeof savedLastGps.lng === 'number') {
+    currentPos.lat = savedLastGps.lat;
+    currentPos.lng = savedLastGps.lng;
+    currentPos.alt = savedLastGps.alt || 0.0;
+    currentPos.acc = savedLastGps.acc || 50.0;
+    currentPos.hasFix = false;
+  }
 
   photos.forEach(p => {
     if (p.category && p.category !== '미분류') customCategories.add(p.category);
@@ -801,17 +811,41 @@ function formatNowTimestamp(dateObj = new Date()) {
   return `${y}-${m}-${d} ${hh}:${mm}`;
 }
 
+function haversineMeters(lat1, lng1, lat2, lng2) {
+  const R = 6371000;
+  const dLat = (lat2 - lat1) * Math.PI / 180.0;
+  const dLng = (lng2 - lng1) * Math.PI / 180.0;
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+            Math.cos(lat1 * Math.PI / 180.0) * Math.cos(lat2 * Math.PI / 180.0) *
+            Math.sin(dLng / 2) * Math.sin(dLng / 2);
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
 function updateCameraHudText() {
   const locEl = document.getElementById('hud-loc-lines');
   const senEl = document.getElementById('hud-sensor-line');
   const timeEl = document.getElementById('hud-time-line');
+  const gpsBtn = document.getElementById('gps-refresh-btn');
   if (locEl) {
-    const tag = `±${currentPos.acc.toFixed(1)}m`;
-    const vTag = `±${(currentPos.acc * 1.5).toFixed(1)}m`;
-    locEl.innerHTML =
-      `위도: ${currentPos.lat.toFixed(6)} (${tag})${currentPos.hasFix ? '' : ' [기본/추정]'}<br>` +
-      `경도: ${currentPos.lng.toFixed(6)} (${tag})<br>` +
-      `표고: ${currentPos.alt.toFixed(1)}m (${vTag})`;
+    if (!currentPos.hasFix || currentPos.lat === null || currentPos.lng === null) {
+      const waitTxt = (currentPos.lat !== null && currentPos.lng !== null)
+        ? `위도: ${currentPos.lat.toFixed(6)} <span style="color:#ff8a80;">(위성 수신 대기 중...)</span><br>경도: ${currentPos.lng.toFixed(6)}<br>표고: ${currentPos.alt.toFixed(1)}m`
+        : `<span style="color:#ffd54f; font-weight:800;">📡 정밀 GPS 위성 신호를 수신하는 중입니다...</span><br><span style="font-size:11px; color:#ccc;">(최초 1~3초 소요 · 상단 [📍 GPS갱신] 터치 시 즉시 재탐색)</span>`;
+      locEl.innerHTML = waitTxt;
+      if (gpsBtn) gpsBtn.classList.remove('active');
+    } else {
+      const ageSec = Math.max(0, Math.round((Date.now() - (currentPos.fixTimeMs || Date.now())) / 1000));
+      const accVal = currentPos.acc;
+      const qualColor = accVal <= 15 ? '#00e676' : (accVal <= 40 ? '#ffd54f' : '#ff8a80');
+      const qualBadge = accVal <= 15 ? '정밀GPS' : (accVal <= 40 ? '보통' : '오차주의');
+      const tag = `±${accVal.toFixed(1)}m`;
+      const vTag = `±${(accVal * 1.5).toFixed(1)}m`;
+      locEl.innerHTML =
+        `위도: ${currentPos.lat.toFixed(6)} <span style="color:${qualColor};font-weight:bold;">(${tag} · ${qualBadge}${ageSec > 3 ? ' · ' + ageSec + '초전' : ''})</span><br>` +
+        `경도: ${currentPos.lng.toFixed(6)} (${tag})<br>` +
+        `표고: ${currentPos.alt.toFixed(1)}m (${vTag})`;
+      if (gpsBtn) gpsBtn.classList.toggle('active', accVal <= 25);
+    }
   }
   if (senEl) {
     const dirKr = compassLabel(currentHeading, true);
@@ -822,23 +856,96 @@ function updateCameraHudText() {
   }
 }
 
+function applyIncomingGpsPosition(pos, isManualRefresh = false) {
+  if (!pos || !pos.coords) return;
+  const newLat = pos.coords.latitude;
+  const newLng = pos.coords.longitude;
+  const newAcc = pos.coords.accuracy || 15.0;
+  const newAlt = (pos.coords.altitude !== null && !isNaN(pos.coords.altitude)) ? pos.coords.altitude : currentPos.alt;
+  const nowMs = Date.now();
+
+  // Filter out sudden coarse cell-tower/Wi-Fi jumps when we already had a recent high-precision GPS lock
+  if (!isManualRefresh && currentPos.hasFix && currentPos.lat !== null && currentPos.lng !== null) {
+    const ageMs = nowMs - (currentPos.fixTimeMs || 0);
+    const dist = haversineMeters(currentPos.lat, currentPos.lng, newLat, newLng);
+    // Reject if accuracy suddenly degrades badly (> 80m and > 2.5x worse than current) within 15 seconds
+    if (ageMs < 15000 && newAcc > 80 && newAcc > currentPos.acc * 2.5) {
+      return;
+    }
+    // Reject impossible teleport spike (> 25m/s speed when accuracy is poor > 45m)
+    const dtSec = Math.max(0.5, ageMs / 1000.0);
+    if (ageMs < 10000 && (dist / dtSec) > 30.0 && newAcc > 45) {
+      return;
+    }
+  }
+
+  currentPos.lat = newLat;
+  currentPos.lng = newLng;
+  currentPos.alt = newAlt;
+  currentPos.acc = newAcc;
+  currentPos.hasFix = true;
+  currentPos.fixTimeMs = nowMs;
+
+  dbSet('lastKnownGps', { lat: newLat, lng: newLng, alt: newAlt, acc: newAcc });
+  updateCameraHudText();
+  if (showMyLocation && map) {
+    updateMyLocationMarker();
+  }
+}
+
+function forceRefreshGpsPosition(showFeedback = false) {
+  if (!navigator.geolocation) {
+    if (showFeedback) showToast('⚠️ 이 브라우저는 GPS 위치 기능을 지원하지 않습니다.');
+    return Promise.resolve(false);
+  }
+  if (showFeedback) showToast('📡 정밀 GPS 위성 좌표를 즉시 갱신합니다...');
+  return new Promise((resolve) => {
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        applyIncomingGpsPosition(pos, true);
+        if (showFeedback) {
+          showToast(`📍 GPS 갱신 완료! (정확도 ±${(pos.coords.accuracy || 0).toFixed(1)}m)`);
+        }
+        resolve(true);
+      },
+      () => {
+        if (showFeedback) {
+          showToast('⚠️ 정밀 GPS 수신 지연: 야외에서 기기의 위치 권한(정확한 위치)이 켜져 있는지 확인해주세요.');
+        }
+        resolve(false);
+      },
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 4500 }
+    );
+  });
+}
+
 function startGpsWatch() {
   if (!navigator.geolocation) return;
   try {
     if (geoWatchId !== null) navigator.geolocation.clearWatch(geoWatchId);
+    // 1. Immediate fresh fix (maximumAge: 0 prevents browser from returning old cached locations)
+    forceRefreshGpsPosition(false);
+
+    // 2. Continuous stream with maximumAge: 0 so OS never throttles with stale cached points
     geoWatchId = navigator.geolocation.watchPosition(
-      (pos) => {
-        currentPos.lat = pos.coords.latitude;
-        currentPos.lng = pos.coords.longitude;
-        currentPos.alt = pos.coords.altitude !== null ? pos.coords.altitude : 25.0;
-        currentPos.acc = pos.coords.accuracy || 5.0;
-        currentPos.hasFix = true;
-        updateCameraHudText();
-        if (showMyLocation && map) updateMyLocationMarker();
-      },
+      (pos) => { applyIncomingGpsPosition(pos, false); },
       () => { updateCameraHudText(); },
-      { enableHighAccuracy: true, maximumAge: 3000, timeout: 10000 }
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 6000 }
     );
+
+    // 3. Active 2.5s high-precision polling loop to prevent iOS Safari / Android Chrome walk-lag &rubber-banding
+    if (gpsPollIntervalId) clearInterval(gpsPollIntervalId);
+    gpsPollIntervalId = setInterval(() => {
+      if (document.hidden) return;
+      const sinceLastMs = Date.now() - (currentPos.fixTimeMs || 0);
+      if (!currentPos.hasFix || sinceLastMs >= 2200) {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => { applyIncomingGpsPosition(pos, false); },
+          () => {},
+          { enableHighAccuracy: true, maximumAge: 0, timeout: 2200 }
+        );
+      }
+    }, 2500);
   } catch (_) {}
 }
 
@@ -1133,6 +1240,20 @@ function renderStampedPhotoDataUri(sourceEl, srcW, srcH, isAfterShot) {
   };
 }
 
+async function ensureFreshGpsBeforeCapture() {
+  const ageMs = Date.now() - (currentPos.fixTimeMs || 0);
+  if (!currentPos.hasFix || currentPos.lat === null || currentPos.lng === null || ageMs > 3000 || currentPos.acc > 35) {
+    await new Promise((resolve) => {
+      if (!navigator.geolocation) { resolve(); return; }
+      navigator.geolocation.getCurrentPosition(
+        (pos) => { applyIncomingGpsPosition(pos, true); resolve(); },
+        () => { resolve(); },
+        { enableHighAccuracy: true, maximumAge: 0, timeout: 1600 }
+      );
+    });
+  }
+}
+
 async function handleShutterClick() {
   const video = document.getElementById('cam-video');
   const fallbackBox = document.getElementById('cam-fallback-box');
@@ -1143,6 +1264,12 @@ async function handleShutterClick() {
 
   playMechanicalShutterSound();
   triggerShutterFlashUI();
+
+  await ensureFreshGpsBeforeCapture();
+  if (currentPos.lat === null || currentPos.lng === null) {
+    showToast('⚠️ 아직 GPS 신호가 잡히지 않았습니다! 야외에서 상단 [📍 GPS갱신] 버튼을 눌러 위치를 먼저 수신해 주세요.', 3800);
+    return;
+  }
 
   const vW = video.videoWidth || 1280;
   const vH = video.videoHeight || 720;
@@ -1202,8 +1329,23 @@ function cancelPendingAfterMode() {
 document.getElementById('native-camera-input').addEventListener('change', async (e) => {
   const file = e.target.files && e.target.files[0];
   if (!file) return;
-  setLoading(true, '📸 촬영한 사진에 GPS 스탬프를 합성하는 중...');
+  setLoading(true, '📸 촬영한 사진의 정밀 GPS 위치 확인 및 스탬프 합성 중...');
   try {
+    await ensureFreshGpsBeforeCapture();
+    const buf = await file.arrayBuffer();
+    const exifMeta = parseExifAndMetaFromArrayBuffer(buf);
+    if (exifMeta.lat != null && exifMeta.lng != null && (Math.abs(exifMeta.lat) > 0.0001 || Math.abs(exifMeta.lng) > 0.0001)) {
+      currentPos.lat = exifMeta.lat;
+      currentPos.lng = exifMeta.lng;
+      if (exifMeta.alt != null) currentPos.alt = exifMeta.alt;
+      if (exifMeta.azimuth != null) currentHeading = exifMeta.azimuth;
+      currentPos.hasFix = true;
+      currentPos.fixTimeMs = Date.now();
+    }
+    if (currentPos.lat === null || currentPos.lng === null) {
+      currentPos.lat = 37.5665;
+      currentPos.lng = 126.9780;
+    }
     const imgEl = await loadFileAsImageElement(file);
     const isAfterShot = Boolean(pendingAfterPhotoId);
     const { dataUri, nowStr } = renderStampedPhotoDataUri(imgEl, imgEl.naturalWidth || imgEl.width, imgEl.naturalHeight || imgEl.height, isAfterShot);
@@ -1460,8 +1602,8 @@ function initLeafletMapIfNeeded() {
     setTimeout(() => map.invalidateSize(), 60);
     return;
   }
-  const initLat = photos.length > 0 ? photos[photos.length - 1].lat : currentPos.lat;
-  const initLng = photos.length > 0 ? photos[photos.length - 1].lng : currentPos.lng;
+  const initLat = photos.length > 0 ? photos[photos.length - 1].lat : (currentPos.lat ?? 37.5665);
+  const initLng = photos.length > 0 ? photos[photos.length - 1].lng : (currentPos.lng ?? 126.9780);
 
   map = L.map('leaflet-map', { maxZoom: 22, zoomControl: false }).setView([initLat, initLng], 17);
   L.control.zoom({ position: 'bottomright' }).addTo(map);
@@ -1763,8 +1905,12 @@ function toggleMyLocationOnMap() {
   }
   if (showMyLocation) {
     startGpsWatch();
-    updateMyLocationMarker();
-    if (map) map.panTo([currentPos.lat, currentPos.lng]);
+    forceRefreshGpsPosition(false).then(() => {
+      updateMyLocationMarker();
+      if (map && currentPos.lat !== null && currentPos.lng !== null) {
+        map.panTo([currentPos.lat, currentPos.lng]);
+      }
+    });
   } else if (myLocMarker && map) {
     map.removeLayer(myLocMarker);
     myLocMarker = null;
@@ -1772,7 +1918,7 @@ function toggleMyLocationOnMap() {
 }
 
 function updateMyLocationMarker() {
-  if (!map || !showMyLocation) return;
+  if (!map || !showMyLocation || currentPos.lat === null || currentPos.lng === null) return;
   const icon = L.divIcon({
     className: '',
     iconSize: [26, 26],
@@ -2502,7 +2648,7 @@ document.getElementById('gallery-multi-input').addEventListener('change', async 
   if (files.length === 0) return;
   setLoading(true, `⚡ 사진 ${files.length}장 초고속 불러오는 중...`);
   try {
-    let defaultLat = currentPos.lat, defaultLng = currentPos.lng;
+    let defaultLat = currentPos.lat ?? 37.5665, defaultLng = currentPos.lng ?? 126.9780;
     if (map) {
       const c = map.getCenter();
       defaultLat = c.lat;
@@ -2614,7 +2760,7 @@ document.getElementById('blueprint-file-input').addEventListener('change', async
     canvas.getContext('2d').drawImage(imgEl, 0, 0, canvas.width, canvas.height);
     const b64 = canvas.toDataURL('image/png');
 
-    let cLat = currentPos.lat, cLng = currentPos.lng;
+    let cLat = currentPos.lat ?? 37.5665, cLng = currentPos.lng ?? 126.9780;
     if (map) {
       const c = map.getCenter();
       cLat = c.lat; cLng = c.lng;
